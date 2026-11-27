@@ -110,6 +110,9 @@ void StagePanel::resized()
 
 void StagePanel::paint (juce::Graphics& g)
 {
+    // TEMP DIAG
+    const auto diagPaintStart = juce::Time::getMillisecondCounterHiRes();
+
     auto area = getLocalBounds().toFloat();
     const auto accent = accentFor (proc.currentOverlay());
 
@@ -207,6 +210,15 @@ void StagePanel::paint (juce::Graphics& g)
         g.setFont (uiFont (11.0f));
         g.drawText (overlayText, area.removeFromBottom (46.0f).reduced (24.0f, 16.0f),
                     juce::Justification::centred, false);
+    }
+
+    // TEMP DIAG
+    {
+        const auto diagPaintEnd = juce::Time::getMillisecondCounterHiRes();
+        static int diagPaints = 0;
+
+        if (++diagPaints % 30 == 0)
+            std::fprintf (stderr, "[diag] paint %.2f ms\n", diagPaintEnd - diagPaintStart);
     }
 }
 

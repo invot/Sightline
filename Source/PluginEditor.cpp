@@ -83,6 +83,12 @@ SightLineEditor::SightLineEditor (SightLineProcessor& p)
 
     cameraDisabled = juce::SystemStats::getEnvironmentVariable ("SIGHTLINE_NO_CAMERA", {}).isNotEmpty();
 
+    // TEMP DIAG
+    if (const auto forced = juce::SystemStats::getEnvironmentVariable ("SIGHTLINE_CAMERA_INDEX", {});
+        forced.isNotEmpty())
+        if (auto* param = proc.apvts.getParameter ("cameraIndex"))
+            param->setValueNotifyingHost (param->convertTo0to1 ((float) forced.getIntValue()));
+
     refreshCameraList();
 
     if (cameraDisabled)
@@ -99,7 +105,7 @@ SightLineEditor::SightLineEditor (SightLineProcessor& p)
     standalone::syncMidiOutput();
     setupPage.setStandaloneInfo (proc.isStandaloneApp(), standalone::midiOutputName());
 
-    startTimerHz (30);
+    startTimerHz (60);
 }
 
 SightLineEditor::~SightLineEditor()
@@ -116,6 +122,11 @@ void SightLineEditor::refreshCameraList()
 {
     cameraNames = juce::CameraDevice::getAvailableDevices();
     setupPage.setCameraNames (cameraNames, proc.cameraIndex());
+
+    // TEMP DIAG
+    std::fprintf (stderr, "[diag] cameras: %d\n", cameraNames.size());
+    for (int i = 0; i < cameraNames.size(); ++i)
+        std::fprintf (stderr, "[diag]   %d: %s\n", i, cameraNames[i].toRawUTF8());
 }
 
 void SightLineEditor::openCamera (int index)
@@ -135,7 +146,7 @@ void SightLineEditor::openCamera (int index)
     }
 
     index = juce::jlimit (0, cameraNames.size() - 1, index);
-    camera.reset (juce::CameraDevice::openDevice (index, 640, 480, 1280, 720, true));
+    camera.reset (juce::CameraDevice::openDevice (index, 640, 480, 1920, 1080, true));
 
     if (camera == nullptr)
     {
@@ -148,6 +159,9 @@ void SightLineEditor::openCamera (int index)
     camera->addListener (this);
     listenerRegistered = this;
     cameraIndexOpened = index;
+
+    // TEMP DIAG
+    std::fprintf (stderr, "[diag] opened %d: %s\n", index, camera->getName().toRawUTF8());
     tracker.reset();
 
     stage.setCameraStatus (camera->getName(), true);
@@ -183,6 +197,9 @@ void SightLineEditor::feedFrame (const juce::Image& image)
     if (! image.isValid())
         return;
 
+    // TEMP DIAG
+    const auto diagStart = juce::Time::getMillisecondCounterHiRes();
+
     juce::Image source = image;
 
     if (source.getFormat() != juce::Image::RGB)
@@ -212,8 +229,12 @@ void SightLineEditor::feedFrame (const juce::Image& image)
         }
     }
 
+    const auto diagRepack = juce::Time::getMillisecondCounterHiRes();
+
     tracker.analyse (rgbScratch.data(), w, h, w * 3, proc.sensitivity());
     stage.setTrackingMask (tracker.lastMask(), tracker.maskWidth(), tracker.maskHeight());
+
+    const auto diagTrack = juce::Time::getMillisecondCounterHiRes();
 
     auto left  = tracker.side (0);
     auto right = tracker.side (1);
@@ -236,6 +257,17 @@ void SightLineEditor::feedFrame (const juce::Image& image)
 
     stage.setFrame (proc.isMirrored() ? mirrorHorizontally (source, mirroredFrame) : source);
     ++framesThisSecond;
+
+    // TEMP DIAG
+    {
+        const auto diagEnd = juce::Time::getMillisecondCounterHiRes();
+        static int diagFrames = 0;
+
+        if (++diagFrames % 30 == 0)
+            std::fprintf (stderr, "[diag] %dx%d repack %.2f track %.2f rest %.2f total %.2f\n",
+                          w, h, diagRepack - diagStart, diagTrack - diagRepack,
+                          diagEnd - diagTrack, diagEnd - diagStart);
+    }
 }
 
 void SightLineEditor::timerCallback()
@@ -292,6 +324,9 @@ void SightLineEditor::timerCallback()
         framesThisSecond = 0;
         fpsWindowStart = now;
         proc.setCameraFps (fps);
+
+        // TEMP DIAG
+        std::fprintf (stderr, "[diag] fps %.1f\n", fps);
     }
 
     // ---- housekeeping ----------------------------------------------------

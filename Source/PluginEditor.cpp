@@ -395,6 +395,7 @@ void SightLineEditor::paint (juce::Graphics& g)
     const auto overlay = proc.currentOverlay();
     const bool drums = overlay == Overlay::Drums;
     const int channel = drums ? proc.drumChannel() : proc.melodyChannel();
+    const bool cameraLive = cameraIndexOpened >= 0 || cameraLiveForTesting;
 
     const auto dot = juce::String::charToString ((juce::juce_wchar) 0x00b7);
     juce::String readout = juce::String (overlayName (overlay)).toUpperCase();
@@ -415,7 +416,7 @@ void SightLineEditor::paint (juce::Graphics& g)
 
     // Status dot: the overlay colour while the camera is live, pink without one.
     readoutArea.removeFromRight (10.0f);
-    g.setColour (cameraIndexOpened >= 0 ? accentFor (overlay) : pal::pink);
+    g.setColour (cameraLive ? accentFor (overlay) : pal::pink);
     g.fillEllipse (readoutArea.removeFromRight (8.0f).withSizeKeepingCentre (8.0f, 8.0f));
 
     // ---- footer ----------------------------------------------------------
@@ -423,7 +424,7 @@ void SightLineEditor::paint (juce::Graphics& g)
     g.setColour (pal::header);
     g.fillRoundedRectangle (f, 12.0f);
 
-    const juce::String footerText = cameraIndexOpened >= 0
+    const juce::String footerText = cameraLive
         ? "Camera is live. Hands are read on this machine; nothing is recorded or sent anywhere."
         : "No camera: open Setup and pick one. Windows may ask for permission the first time.";
 

@@ -317,19 +317,38 @@ int main()
 
         const auto snapDir = juce::SystemStats::getEnvironmentVariable ("SIGHTLINE_SNAPSHOT_DIR", {});
 
-        // The checks above need a hand for the tracker to find; the pictures do
-        // not, so the stage shows the empty room while the hand stays "held".
-        const auto showEmptyRoom = [&]
+        // The checks above need a hand for the tracker to find; the pictures
+        // show a stand-in camera frame instead, so the stage has a picture
+        // behind the rails the way a live camera would.
+        auto snapshotFrame = makeCameraImage (960, 540);
+
+        if (const auto photo = juce::File::getCurrentWorkingDirectory()
+                                   .getChildFile ("docs/media/camera-frame.jpg");
+            photo.existsAsFile())
+            if (const auto loaded = juce::ImageFileFormat::loadFrom (photo); loaded.isValid())
+                snapshotFrame = loaded;
+
+        const auto showCameraFrame = [&]
         {
             if (sight != nullptr)
                 if (auto* stage = sight->getStageForTesting())
-                    stage->setFrame (makeCameraImage (960, 540));
+                    stage->setFrame (snapshotFrame);
         };
 
         if (snapDir.isNotEmpty())
         {
+            // The shots show a live-looking feed, so the chrome should agree.
+            if (sight != nullptr)
+            {
+                sight->setCameraLiveForTesting (true);
+
+                if (auto* stage = sight->getStageForTesting())
+                    stage->setCameraStatus ("webcam", true);
+            }
+
             auto save = [&] (const juce::String& name)
             {
+                proc->setCameraFps (30.0f);
                 const auto image = editor->createComponentSnapshot (editor->getLocalBounds());
                 juce::File file (snapDir + "/" + name + ".png");
                 file.deleteFile();
@@ -343,7 +362,7 @@ int main()
                 {
                     tabs->setSelected (0, true);
                     juce::MessageManager::getInstance()->runDispatchLoopUntil (60);
-                    showEmptyRoom();
+                    showCameraFrame();
                     save ("play");
 
                     // The same frame with the tracking mask over it.
@@ -367,14 +386,14 @@ int main()
                         juce::Thread::sleep (140);
                         sight->feedFrame (frame);
                         juce::MessageManager::getInstance()->runDispatchLoopUntil (60);
-                        showEmptyRoom();
+                        showCameraFrame();
                         save ("play-drums");
 
                         // Armed MIDI learn: the pad is highlighted and the
                         // banner says what to do.
                         proc->startDrumLearn (1);
                         juce::MessageManager::getInstance()->runDispatchLoopUntil (60);
-                        showEmptyRoom();
+                        showCameraFrame();
                         save ("play-learn");
                         proc->cancelDrumLearn();
 

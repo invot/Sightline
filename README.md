@@ -36,7 +36,8 @@ MIDI note number in its corner.
 ![Setup page](docs/screenshots/setup.png)
 
 These are rendered offscreen by the smoke harness, which has no camera attached, so the
-picture behind the rails is a drawn test frame (see [Building](#building) to regenerate them).
+picture behind the rails is a stand-in camera frame (`docs/media/camera-frame.jpg`) rather
+than a live feed (see [Building](#building) to regenerate them).
 
 ## Building
 

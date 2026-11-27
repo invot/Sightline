@@ -28,6 +28,10 @@ public:
     ui::TabBar* getTabBarForTesting() noexcept { return &tabs; }
     ui::StagePanel* getStageForTesting() noexcept { return &stage; }
 
+    /** Draws the live-camera chrome for offscreen snapshots, which have no
+        hardware attached. */
+    void setCameraLiveForTesting (bool live) { cameraLiveForTesting = live; repaint(); }
+
 private:
     void timerCallback() override;
     void imageReceived (const juce::Image&) override;
@@ -66,6 +70,7 @@ private:
     float fps = 0.0f;
 
     bool cameraDisabled = false;   // set by the smoke harness: no hardware in tests
+    bool cameraLiveForTesting = false;
     int testNoteOffTicks = -1;
     int testNote = 60;
     int testChannel = 1;

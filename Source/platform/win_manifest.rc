@@ -1,1 +1,5 @@
 1 24 "app.manifest"
+
+// The app icon: the same viewfinder mark as the editor header. Explorer, the
+// taskbar and JUCE's window class (ExtractAssociatedIcon) take it from the exe.
+IDI_ICON1 ICON "sightline.ico"

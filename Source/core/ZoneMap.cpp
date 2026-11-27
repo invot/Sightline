@@ -7,23 +7,15 @@ namespace sl
 
 namespace
 {
-    struct Drum
+    // General MIDI percussion, so a DAW drum kit answers out of the box.
+    constexpr const char* drumNames[numDrumPads] =
     {
-        const char* name;
-        int note;
+        "Kick", "Snare", "Closed Hat", "Open Hat", "Clap", "Low Tom", "Crash", "Ride"
     };
 
-    // General MIDI percussion, so a DAW drum kit answers out of the box.
-    constexpr Drum drums[numDrumPads] =
+    constexpr int gmDrumNotes[numDrumPads] =
     {
-        { "Kick",      36 },
-        { "Snare",     38 },
-        { "Closed Hat", 42 },
-        { "Open Hat",  46 },
-        { "Clap",      39 },
-        { "Low Tom",   45 },
-        { "Crash",     49 },
-        { "Ride",      51 }
+        36, 38, 42, 46, 39, 45, 49, 51
     };
 
     constexpr float railInsetX   = 0.016f;
@@ -67,17 +59,33 @@ int baseNoteForOctave (int octave) noexcept
     return 12 * (4 + octave);   // octave 0 -> C3 (48)
 }
 
+const DrumNotes& defaultDrumNotes() noexcept
+{
+    static const DrumNotes notes = []
+    {
+        DrumNotes n {};
+
+        for (int i = 0; i < numDrumPads; ++i)
+            n[(size_t) i] = gmDrumNotes[i];
+
+        return n;
+    }();
+
+    return notes;
+}
+
 const char* drumPadName (int index) noexcept
 {
-    return drums[std::clamp (index, 0, numDrumPads - 1)].name;
+    return drumNames[std::clamp (index, 0, numDrumPads - 1)];
 }
 
 int drumPadNote (int index) noexcept
 {
-    return drums[std::clamp (index, 0, numDrumPads - 1)].note;
+    return defaultDrumNotes()[(size_t) std::clamp (index, 0, numDrumPads - 1)];
 }
 
-ZoneLayout buildZones (Overlay overlay, int root, ScaleType scale, int octave)
+ZoneLayout buildZones (Overlay overlay, int root, ScaleType scale, int octave,
+                       const DrumNotes& drumNotes)
 {
     ZoneLayout layout;
     const int base = baseNoteForOctave (octave);
@@ -151,7 +159,7 @@ ZoneLayout buildZones (Overlay overlay, int root, ScaleType scale, int octave)
                 {
                     Zone z;
                     z.side = side;
-                    z.note = drumPadNote (i);
+                    z.note = drumNotes[(size_t) i];
                     z.label = drumPadName (i);
                     z.subLabel = std::to_string (z.note);
                     z.bounds = rowBounds (rail, i, numDrumPads);

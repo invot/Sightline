@@ -12,7 +12,7 @@ bool isRunning();
 void showAudioSettings();
 
 /** JUCE's standalone wrapper mutes the audio input by default to avoid a
-    feedback loop. SightLine never passes the input to the output, so there is
+    feedback loop. sightline never passes the input to the output, so there is
     no loop: switch the mute off. */
 void unmuteInput();
 

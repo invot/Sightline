@@ -11,6 +11,11 @@ juce::AudioProcessorEditor* SightLineProcessor::createEditor()
 
 namespace
 {
+    juce::String padNoteKey (int pad)
+    {
+        return "padNote" + juce::String (pad);
+    }
+
     juce::StringArray rootNames()
     {
         juce::StringArray a;
@@ -26,7 +31,7 @@ SightLineProcessor::SightLineProcessor()
     : AudioProcessor (BusesProperties()
                           .withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
                           .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
-      apvts (*this, nullptr, "SightLine", createLayout())
+      apvts (*this, nullptr, "sightline", createLayout())
 {
     p.overlay     = apvts.getRawParameterValue ("overlay");
     p.keyRoot     = apvts.getRawParameterValue ("keyRoot");
@@ -193,6 +198,89 @@ bool   SightLineProcessor::builtInSoundOn() const { return p.builtIn->load() > 0
 int    SightLineProcessor::cameraIndex() const { return (int) p.camera->load(); }
 
 //==============================================================================
+DrumNotes SightLineProcessor::drumNotes() const
+{
+    auto notes = defaultDrumNotes();
+
+    for (int i = 0; i < numDrumPads; ++i)
+    {
+        const auto value = apvts.state.getProperty (padNoteKey (i));
+
+        if (! value.isVoid())
+            notes[(size_t) i] = juce::jlimit (0, 127, (int) value);
+    }
+
+    return notes;
+}
+
+int SightLineProcessor::drumNote (int pad) const
+{
+    return drumNotes()[(size_t) juce::jlimit (0, numDrumPads - 1, pad)];
+}
+
+void SightLineProcessor::setDrumNote (int pad, int note)
+{
+    if (pad < 0 || pad >= numDrumPads)
+        return;
+
+    note = juce::jlimit (0, 127, note);
+    const auto key = padNoteKey (pad);
+
+    // A pad back on its GM note needs no stored value.
+    if (note == defaultDrumNotes()[(size_t) pad])
+        apvts.state.removeProperty (key, nullptr);
+    else
+        apvts.state.setProperty (key, note, nullptr);
+
+    // The mapping is not a parameter, so tell the host the document changed.
+    updateHostDisplay (juce::AudioProcessorListener::ChangeDetails{}
+                           .withNonParameterStateChanged (true));
+
+    syncZones();
+}
+
+void SightLineProcessor::resetDrumNote (int pad)
+{
+    if (pad < 0 || pad >= numDrumPads)
+        return;
+
+    apvts.state.removeProperty (padNoteKey (pad), nullptr);
+    updateHostDisplay (juce::AudioProcessorListener::ChangeDetails{}
+                           .withNonParameterStateChanged (true));
+    syncZones();
+}
+
+void SightLineProcessor::startDrumLearn (int pad)
+{
+    if (pad < 0 || pad >= numDrumPads)
+        return;
+
+    learnedPad.store (-1);
+    learnedNote.store (-1);
+    learnPad.store (pad);
+}
+
+void SightLineProcessor::cancelDrumLearn()
+{
+    learnPad.store (-1);
+    learnedPad.store (-1);
+    learnedNote.store (-1);
+}
+
+bool SightLineProcessor::takeLearnedNote (int& pad, int& note)
+{
+    const int learned = learnedPad.load();
+
+    if (learned < 0)
+        return false;
+
+    pad = learned;
+    note = learnedNote.load();
+    learnedPad.store (-1);
+    return true;
+}
+
+//==============================================================================
 void SightLineProcessor::syncZones()
 {
     const auto overlay = currentOverlay();
@@ -205,19 +293,27 @@ void SightLineProcessor::syncZones()
     const double dwell = dwellMs();
     const double release = releaseMs();
     const bool drums = overlay == Overlay::Drums;
+    const auto mapping = drumNotes();
+
+    int mappingHash = 0;
+
+    for (const auto n : mapping)
+        mappingHash = mappingHash * 131 + n;
 
     const bool geometryChanged = (int) overlay != lastOverlay || root != lastRoot
                               || (int) scale != lastScale || octave != lastOctave;
+    const bool mappingChanged = mappingHash != lastDrumHash;
 
-    if (geometryChanged || lastMelodyChan != mel || lastDrumChan != drum || lastDrums != drums)
+    if (geometryChanged || mappingChanged
+        || lastMelodyChan != mel || lastDrumChan != drum || lastDrums != drums)
     {
         // Anything sounding belongs to the old layout.
         std::vector<NoteEvent> released;
         gestures.reset (released);
         push (released);
 
-        if (geometryChanged)
-            gestures.setZones (buildZones (overlay, root, scale, octave).zones);
+        if (geometryChanged || mappingChanged)
+            gestures.setZones (buildZones (overlay, root, scale, octave, mapping).zones);
     }
 
     gestures.setParams (vel, mel, drum, dwell, release, drums);
@@ -229,6 +325,7 @@ void SightLineProcessor::syncZones()
     lastMelodyChan = mel;
     lastDrumChan = drum;
     lastDrums = drums;
+    lastDrumHash = mappingHash;
 }
 
 void SightLineProcessor::push (const std::vector<NoteEvent>& events)
@@ -297,7 +394,7 @@ LiveState SightLineProcessor::getLiveState() const
 //==============================================================================
 void SightLineProcessor::sendAllNotesOff (juce::MidiBuffer& midi, int offset, int channel)
 {
-    // Only the channels SightLine plays on: the rest of the track's MIDI is
+    // Only the channels sightline plays on: the rest of the track's MIDI is
     // none of its business.
     midi.addEvent (juce::MidiMessage::allNotesOff (channel), offset);
     midi.addEvent (juce::MidiMessage::allSoundOff (channel), offset);
@@ -314,6 +411,33 @@ void SightLineProcessor::playPreviewNote (int note, int channel, int velocity)
 void SightLineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
     juce::ScopedNoDenormals noDenormals;
+
+    // MIDI learn: the next note that reaches the plugin while a pad is armed
+    // becomes that pad's note. Scan before sightline's own notes are added, so
+    // it cannot learn a note it just played itself. The audio thread only
+    // publishes the result; the editor applies and stores it.
+    if (const int learning = learnPad.load(); learning >= 0)
+    {
+        for (const auto meta : midi)
+        {
+            const auto m = meta.getMessage();
+
+            if (m.isNoteOn())
+            {
+                // Only the call that actually disarms the pad may publish a
+                // note: a cancel (or a new learn) that landed in between wins.
+                int expected = learning;
+
+                if (learnPad.compare_exchange_strong (expected, -1))
+                {
+                    learnedNote.store (m.getNoteNumber());
+                    learnedPad.store (learning);
+                }
+
+                break;
+            }
+        }
+    }
 
     const bool standalone = isStandaloneApp();
     const int numSamples = buffer.getNumSamples();
@@ -411,6 +535,9 @@ void SightLineProcessor::getStateInformation (juce::MemoryBlock& destData)
 
 void SightLineProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
+    // A project load takes over from any pad that was waiting for a note.
+    cancelDrumLearn();
+
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
         if (xml->hasTagName (apvts.state.getType()))
             apvts.replaceState (juce::ValueTree::fromXml (*xml));

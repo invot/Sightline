@@ -4,6 +4,45 @@
 namespace sl
 {
 
+namespace
+{
+    /** Flips a frame horizontally into a reused buffer. The picture is mirrored
+        in pixels rather than with a Graphics transform: drawing an image under
+        a transform proved unreliable in the offscreen renderer, and this keeps
+        the picture, the debug mask and the hand markers in the same space. */
+    juce::Image mirrorHorizontally (const juce::Image& source, juce::Image& scratch)
+    {
+        const int w = source.getWidth();
+        const int h = source.getHeight();
+
+        if (! scratch.isValid() || scratch.getWidth() != w || scratch.getHeight() != h)
+            scratch = juce::Image (juce::Image::RGB, w, h, false, juce::SoftwareImageType());
+
+        const juce::Image::BitmapData in (source, juce::Image::BitmapData::readOnly);
+        juce::Image::BitmapData out (scratch, juce::Image::BitmapData::writeOnly);
+
+        for (int y = 0; y < h; ++y)
+        {
+            const auto* src = in.getLinePointer (y);
+            auto* dst = out.getLinePointer (y);
+
+            for (int x = 0; x < w; ++x)
+            {
+                const auto* s = src + (size_t) x * (size_t) in.pixelStride;
+                auto* d = dst + (size_t) (w - 1 - x) * (size_t) out.pixelStride;
+                d[0] = s[0];
+                d[1] = s[1];
+                d[2] = s[2];
+
+                if (out.pixelStride > 3)
+                    d[3] = 0xff;
+            }
+        }
+
+        return scratch;
+    }
+}
+
 SightLineEditor::SightLineEditor (SightLineProcessor& p)
     : AudioProcessorEditor (&p),
       proc (p),
@@ -66,6 +105,7 @@ SightLineEditor::SightLineEditor (SightLineProcessor& p)
 SightLineEditor::~SightLineEditor()
 {
     stopTimer();
+    proc.cancelDrumLearn();
     closeCamera();
     proc.stopTracking();
     setLookAndFeel (nullptr);
@@ -173,6 +213,7 @@ void SightLineEditor::feedFrame (const juce::Image& image)
     }
 
     tracker.analyse (rgbScratch.data(), w, h, w * 3, proc.sensitivity());
+    stage.setTrackingMask (tracker.lastMask(), tracker.maskWidth(), tracker.maskHeight());
 
     auto left  = tracker.side (0);
     auto right = tracker.side (1);
@@ -193,13 +234,22 @@ void SightLineEditor::feedFrame (const juce::Image& image)
 
     proc.updateHands (left, right, juce::Time::getMillisecondCounterHiRes());
 
-    stage.setFrame (source);
+    stage.setFrame (proc.isMirrored() ? mirrorHorizontally (source, mirroredFrame) : source);
     ++framesThisSecond;
 }
 
 void SightLineEditor::timerCallback()
 {
     proc.syncZones();
+
+    // ---- apply a learned drum note on the message thread -----------------
+    int learnedPad = -1, learnedNote = -1;
+
+    if (proc.takeLearnedNote (learnedPad, learnedNote))
+    {
+        proc.setDrumNote (learnedPad, learnedNote);
+        stage.repaint();
+    }
 
     // ---- follow the camera choice ----------------------------------------
     const int wanted = proc.cameraIndex();
@@ -260,7 +310,10 @@ void SightLineEditor::timerCallback()
                                    cameraIndexOpened >= 0);
     }
 
-    if (proc.currentOverlay() == Overlay::Drums)
+    if (const int pad = proc.learningPad(); pad >= 0)
+        stage.setOverlayText (juce::String ("MIDI learn: ") + drumPadName (pad)
+                              + " - play a note on your controller, or right-click the pad to cancel.");
+    else if (proc.currentOverlay() == Overlay::Drums)
         stage.setOverlayText ("Drums: place a hand on a pad - both rails carry the same kit.");
     else
         stage.setOverlayText ("Move a hand into a rail and hold it on a note.");

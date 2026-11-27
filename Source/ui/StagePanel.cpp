@@ -8,6 +8,9 @@ StagePanel::StagePanel (SightLineProcessor& p)
       proc (p)
 {
     addAndMakeVisible (overlaySwitch);
+    addAndMakeVisible (trackingPill);
+    trackingPill.button.setTooltip ("Show what the hand tracker sees: skin, motion, the search regions, hand positions and fps");
+    trackingPill.button.onClick = [this] { setTrackingDebug (trackingPill.button.getToggleState()); };
     syncOverlay();
 
     overlaySwitch.onChange = [this] (int index)
@@ -78,7 +81,12 @@ void StagePanel::setCameraStatus (const juce::String& name, bool live)
 
     // Don't leave the last picture frozen on screen once the camera is gone.
     if (! live)
+    {
         frame = {};
+        mask.clear();
+        maskW = maskH = 0;
+        maskImage = {};
+    }
 
     repaint();
 }
@@ -97,6 +105,7 @@ void StagePanel::resized()
     // Top centre: the rails run nearly the full height down both sides, and the
     // middle of the picture (the player's face) has no targets.
     overlaySwitch.setBounds (getLocalBounds().withSizeKeepingCentre (236, 30).withY (12));
+    trackingPill.setBounds (getLocalBounds().withSizeKeepingCentre (132, 28).withY (50));
 }
 
 void StagePanel::paint (juce::Graphics& g)
@@ -115,15 +124,8 @@ void StagePanel::paint (juce::Graphics& g)
         if (frame.isValid())
         {
             {
-                // Mirror the picture only; the overlay is drawn afterwards,
-                // unmirrored, so a key always sits where it looks like it does.
-                juce::Graphics::ScopedSaveState flip (g);
-
-                if (proc.isMirrored())
-                    g.addTransform (juce::AffineTransform::translation (area.getCentreX(), 0.0f)
-                                        .scaled (-1.0f, 1.0f)
-                                        .translated (-area.getCentreX(), 0.0f));
-
+                // The editor hands over the frame already mirrored, so it is
+                // drawn straight; the overlay is in the same display space.
                 g.drawImage (frame, area, juce::RectanglePlacement::centred
                                             | juce::RectanglePlacement::fillDestination);
             }
@@ -131,6 +133,9 @@ void StagePanel::paint (juce::Graphics& g)
             // A little shade so the translucent keys stay readable on a bright room.
             g.setColour (juce::Colours::black.withAlpha (0.16f));
             g.fillRect (area);
+
+            if (trackingDebug)
+                drawTrackingOverlay (g, area);
         }
         else
         {
@@ -139,6 +144,12 @@ void StagePanel::paint (juce::Graphics& g)
 
         drawRails (g, area);
         drawHands (g, area);
+
+        if (trackingDebug)
+            drawTrackingReadout (g, area);
+
+        if (const int pad = proc.learningPad(); pad >= 0)
+            drawLearnBanner (g, area, pad);
     }
 
     // ---- floating status -------------------------------------------------
@@ -199,6 +210,255 @@ void StagePanel::paint (juce::Graphics& g)
     }
 }
 
+void StagePanel::setTrackingMask (const std::vector<uint8_t>& values, int width, int height)
+{
+    if (width <= 0 || height <= 0 || values.size() < (size_t) width * (size_t) height)
+    {
+        mask.clear();
+        maskW = maskH = 0;
+        maskImage = {};
+        return;
+    }
+
+    mask = values;
+    maskW = width;
+    maskH = height;
+
+    if (trackingDebug)
+        rebuildMaskImage();
+}
+
+void StagePanel::setTrackingDebug (bool shouldShow)
+{
+    if (trackingDebug == shouldShow)
+        return;
+
+    trackingDebug = shouldShow;
+    trackingPill.button.setToggleState (shouldShow, juce::dontSendNotification);
+    rebuildMaskImage();
+    repaint();
+}
+
+void StagePanel::rebuildMaskImage()
+{
+    if (! trackingDebug || maskW <= 0 || maskH <= 0 || mask.empty())
+    {
+        maskImage = {};
+        return;
+    }
+
+    if (! maskImage.isValid() || maskImage.getWidth() != maskW || maskImage.getHeight() != maskH)
+        maskImage = juce::Image (juce::Image::ARGB, maskW, maskH, true, juce::SoftwareImageType());
+
+    const auto skin = pal::teal;
+    const auto motion = pal::amber;
+    juce::Image::BitmapData pixels (maskImage, juce::Image::BitmapData::writeOnly);
+
+    for (int y = 0; y < maskH; ++y)
+    {
+        for (int x = 0; x < maskW; ++x)
+        {
+            const int sourceX = proc.isMirrored() ? maskW - 1 - x : x;
+            const auto v = mask[(size_t) y * (size_t) maskW + (size_t) sourceX];
+            juce::Colour c = juce::Colours::transparentBlack;
+
+            if (v == 255)       c = skin.brighter (0.55f);
+            else if (v == 170)  c = skin;
+            else if (v == 90)   c = motion;
+
+            pixels.setPixelColour (x, y, c);
+        }
+    }
+}
+
+void StagePanel::drawTrackingOverlay (juce::Graphics& g, juce::Rectangle<float> area)
+{
+    if (! frame.isValid())
+        return;
+
+    const auto visible = visibleFrameArea (frame.getWidth(), frame.getHeight());
+    const auto edgeAt = [&] (float nx)
+    {
+        return area.getX() + (nx - visible.x) / visible.w * area.getWidth();
+    };
+
+    const float leftEdge = juce::jlimit (area.getX(), area.getRight(), edgeAt (0.37f));
+    const float rightEdge = juce::jlimit (area.getX(), area.getRight(), edgeAt (0.63f));
+
+    // The middle band is never searched: shade it so it is obvious why a hand
+    // resting there does nothing.
+    g.setColour (juce::Colours::black.withAlpha (0.22f));
+    g.fillRect (juce::Rectangle<float> (leftEdge, area.getY(), rightEdge - leftEdge, area.getHeight()));
+
+    if (maskImage.isValid())
+    {
+        juce::Graphics::ScopedSaveState state (g);
+        g.setImageResamplingQuality (juce::Graphics::lowResamplingQuality);
+
+        // The mask grid is flipped with the picture when it is built, so the
+        // cells land on the pixels they were sampled from. It is opaque except
+        // where the tracker saw nothing, so the
+        // translucency comes from the graphics opacity rather than per-pixel
+        // alpha, which the scaled software-image path blends unreliably.
+        g.setOpacity (0.45f);
+        g.drawImage (maskImage, area, juce::RectanglePlacement::centred
+                                    | juce::RectanglePlacement::fillDestination);
+    }
+
+    g.setColour (pal::yellow.withAlpha (0.55f));
+    g.drawVerticalLine (juce::roundToInt (leftEdge), area.getY(), area.getBottom());
+    g.drawVerticalLine (juce::roundToInt (rightEdge), area.getY(), area.getBottom());
+}
+
+void StagePanel::drawTrackingReadout (juce::Graphics& g, juce::Rectangle<float> area)
+{
+    const auto live = proc.getLiveState();
+    auto card = juce::Rectangle<float> (area.getCentreX() - 127.0f, area.getY() + 86.0f, 254.0f, 100.0f);
+
+    g.setColour (pal::bg.withAlpha (0.82f));
+    g.fillRoundedRectangle (card, 10.0f);
+    g.setColour (pal::yellow.withAlpha (0.4f));
+    g.drawRoundedRectangle (card.reduced (0.5f), 10.0f, 1.0f);
+
+    auto r = card.reduced (12.0f, 9.0f);
+    auto header = r.removeFromTop (15.0f);
+
+    g.setColour (pal::yellow);
+    g.setFont (uiFont (9.5f, true));
+    g.drawText ("TRACKING TEST", header, juce::Justification::centredLeft, false);
+
+    g.setColour (pal::text.withAlpha (0.8f));
+    g.drawText (juce::String (juce::roundToInt (live.fps)) + " FPS", header,
+                juce::Justification::centredRight, false);
+
+    for (int s = 0; s < 2; ++s)
+    {
+        auto line = r.removeFromTop (17.0f);
+        auto tag = line.removeFromLeft (16.0f);
+
+        g.setColour (s == 0 ? pal::teal : pal::pink);
+        g.setFont (uiFont (10.5f, true));
+        g.drawText (s == 0 ? "L" : "R", tag, juce::Justification::centredLeft, false);
+
+        juce::String text;
+
+        if (live.handSeen[s])
+        {
+            text << "x " << juce::String (live.handX[s], 2)
+                 << "  y " << juce::String (live.handY[s], 2);
+
+            const auto& zones = proc.getZones();
+            const int hovered = live.hovered[s];
+
+            if (hovered >= 0 && hovered < (int) zones.size())
+                text << "   " << juce::String (zones[(size_t) hovered].label.c_str());
+            else if (live.activeNote[s] >= 0)
+                text << "   " << juce::String (midiNoteName (live.activeNote[s]).c_str());
+            else
+                text << "   no target";
+        }
+        else
+        {
+            text = "no hand";
+        }
+
+        g.setColour (live.handSeen[s] ? pal::text : pal::dim);
+        g.setFont (uiFont (10.5f));
+        g.drawText (text, line, juce::Justification::centredLeft, false);
+    }
+
+    // What the mask colours mean.
+    auto legend = r.removeFromBottom (13.0f);
+    const auto swatch = [&] (juce::Colour colour, const juce::String& name)
+    {
+        g.setColour (colour);
+        g.fillEllipse (legend.removeFromLeft (7.0f).withSizeKeepingCentre (7.0f, 7.0f));
+        legend.removeFromLeft (4.0f);
+
+        g.setColour (pal::dim);
+        g.setFont (uiFont (9.0f));
+        g.drawText (name, legend.removeFromLeft (textWidth (uiFont (9.0f), name) + 4.0f),
+                    juce::Justification::centredLeft, false);
+        legend.removeFromLeft (10.0f);
+    };
+
+    swatch (pal::teal.withAlpha (0.55f), "skin");
+    swatch (pal::amber.withAlpha (0.55f), "motion");
+    swatch (pal::teal.brighter (0.5f), "both");
+}
+
+void StagePanel::mouseDown (const juce::MouseEvent& e)
+{
+    if (! e.mods.isPopupMenu() || proc.currentOverlay() != Overlay::Drums)
+        return;
+
+    const auto area = getLocalBounds().toFloat();
+    const auto& zones = proc.getZones();
+
+    for (int i = 0; i < (int) zones.size(); ++i)
+    {
+        const auto& z = zones[(size_t) i];
+
+        if (toStage (area, z.bounds).contains (e.position))
+        {
+            showPadMenu (i - z.side * numDrumPads);
+            return;
+        }
+    }
+}
+
+void StagePanel::showPadMenu (int pad)
+{
+    const int current = proc.drumNote (pad);
+    const int gm = defaultDrumNotes()[(size_t) pad];
+
+    juce::PopupMenu menu;
+    menu.addSectionHeader (juce::String (drumPadName (pad)) + "   "
+                           + juce::String::charToString ((juce::juce_wchar) 0x00b7)
+                           + "   note " + juce::String (current));
+    menu.addItem (1, "MIDI learn");
+    menu.addItem (2, "Reset to GM note (" + juce::String (gm) + ")", current != gm);
+
+    if (proc.learningPad() >= 0)
+        menu.addItem (3, "Cancel learn");
+
+    juce::Component::SafePointer<StagePanel> safe (this);
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition(),
+                        [safe, pad] (int result)
+                        {
+                            if (safe == nullptr)
+                                return;
+
+                            if (result == 1)      safe->proc.startDrumLearn (pad);
+                            else if (result == 2) safe->proc.resetDrumNote (pad);
+                            else if (result == 3) safe->proc.cancelDrumLearn();
+
+                            safe->repaint();
+                        });
+}
+
+void StagePanel::drawLearnBanner (juce::Graphics& g, juce::Rectangle<float> area, int pad)
+{
+    const juce::String text = "MIDI LEARN  " + juce::String::charToString ((juce::juce_wchar) 0x00b7)
+                            + "  " + juce::String (drumPadName (pad))
+                            + "  " + juce::String::charToString ((juce::juce_wchar) 0x00b7)
+                            + "  play a note on your controller";
+    const auto font = uiFont (11.5f, true);
+    const float width = textWidth (font, text) + 36.0f;
+
+    auto chip = juce::Rectangle<float> (width, 28.0f)
+                    .withCentre ({ area.getCentreX(), area.getBottom() - 104.0f });
+
+    g.setColour (pal::bg.withAlpha (0.86f));
+    g.fillRoundedRectangle (chip, 14.0f);
+    g.setColour (pal::yellow.withAlpha (0.9f));
+    g.drawRoundedRectangle (chip.reduced (0.5f), 14.0f, 1.2f);
+    g.setColour (pal::yellow);
+    g.setFont (font);
+    g.drawText (text, chip, juce::Justification::centred, false);
+}
+
 void StagePanel::drawPlaceholder (juce::Graphics& g, juce::Rectangle<float> area)
 {
     g.setColour (pal::panelSoft);
@@ -221,7 +481,7 @@ void StagePanel::drawPlaceholder (juce::Graphics& g, juce::Rectangle<float> area
     g.setColour (pal::dim.withAlpha (0.8f));
     g.setFont (uiFont (11.0f));
     g.drawFittedText ("Choose a camera on the Setup page. If this is the first time, "
-                      "Windows may ask whether SightLine can use it.",
+                      "Windows may ask whether sightline can use it.",
                       centre.toNearestInt(), juce::Justification::top, 3);
 }
 
@@ -229,6 +489,7 @@ void StagePanel::drawRails (juce::Graphics& g, juce::Rectangle<float> area)
 {
     const auto overlay = proc.currentOverlay();
     const auto accent = accentFor (overlay);
+    const int learnPad = overlay == Overlay::Drums ? proc.learningPad() : -1;
     const auto live = proc.getLiveState();
     const float opacity = proc.overlayOpacity();
 
@@ -281,6 +542,14 @@ void StagePanel::drawRails (juce::Graphics& g, juce::Rectangle<float> area)
             auto bar = r.removeFromBottom (2.5f).reduced (5.0f, 0.0f);
             g.setColour (accent.withAlpha (0.85f));
             g.fillRoundedRectangle (bar.withWidth (bar.getWidth() * live.dwell[z.side]), 1.2f);
+        }
+
+        if (learnPad >= 0 && i - z.side * numDrumPads == learnPad)
+        {
+            g.setColour (pal::yellow.withAlpha (0.16f));
+            g.fillRoundedRectangle (r, 6.0f);
+            g.setColour (pal::yellow.withAlpha (0.9f));
+            g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 2.0f);
         }
 
         if (r.getHeight() >= 15.0f)

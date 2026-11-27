@@ -47,7 +47,7 @@ if (EXISTS "${SL_JUCE_DIR}/CMakeLists.txt")
         BUNDLE_ID                 "com.codebuff.sightline"
         PLUGIN_MANUFACTURER_CODE  Cdbx
         PLUGIN_CODE               Sght
-        PRODUCT_NAME              "SightLine"
+        PRODUCT_NAME              "sightline"
         DESCRIPTION               "Play notes and drums by moving your hands in front of a webcam"
         IS_SYNTH                  FALSE
         NEEDS_MIDI_INPUT          TRUE

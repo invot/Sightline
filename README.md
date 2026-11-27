@@ -1,4 +1,4 @@
-# SightLine
+# sightline
 
 A VST3 plugin and standalone Windows app that turns a webcam into a MIDI controller:
 move a hand onto one of the translucent targets drawn down the sides of the picture and
@@ -11,9 +11,9 @@ noise on its own.
 ## Download
 
 Every push to `main` builds the Windows installer and the VST3 and publishes them as the
-[**latest**](https://github.com/invot/Sightline/releases/tag/latest) release (see
+[**latest**](https://github.com/invot/sightline/releases/tag/latest) release (see
 `.github/workflows/release.yml`). The installer puts the standalone app in Program Files
-and `SightLine.vst3` in the shared VST3 folder; the zip is the VST3 bundle on its own.
+and `sightline.vst3` in the shared VST3 folder; the zip is the VST3 bundle on its own.
 
 ## Screenshots
 
@@ -52,8 +52,8 @@ Everything is built with the portable toolchain in `.tools` (MinGW-w64 GCC 16.2,
 Outputs:
 
 ```
-build/SightLine_artefacts/Release/VST3/SightLine.vst3
-build/SightLine_artefacts/Release/Standalone/SightLine.exe
+build/SightLine_artefacts/Release/VST3/sightline.vst3
+build/SightLine_artefacts/Release/Standalone/sightline.exe
 build/SightLineTests.exe       # zone map / dwell gate / detector / synth checks
 build/SightLineSmoke.exe       # offscreen end-to-end harness (SIGHTLINE_NO_CAMERA=1)
 ```
@@ -72,10 +72,10 @@ re-applied.
 
 ## Using it in a DAW
 
-1. Copy `SightLine.vst3` into `C:\Program Files\Common Files\VST3`, or add the
+1. Copy `sightline.vst3` into `C:\Program Files\Common Files\VST3`, or add the
    `build/SightLine_artefacts/Release/VST3` folder to the plugin paths.
-2. Add SightLine to a track **in front of** the instrument you want it to play, and route
-   SightLine's MIDI output to that instrument (in most DAWs a MIDI-generating plugin feeds
+2. Add sightline to a track **in front of** the instrument you want it to play, and route
+   sightline's MIDI output to that instrument (in most DAWs a MIDI-generating plugin feeds
    the next plugin on the track automatically).
 3. Open the editor, go to **Setup** and pick the camera. The video appears on the **Play**
    page with the overlay rails.
@@ -113,6 +113,34 @@ is worth knowing:
 * A hand fully outside the side regions is ignored by design.
 * A dark or gloved hand may only be found while it moves.
 * Mirroring is on by default, matching how people expect a webcam to behave.
+
+### Drum mapping
+
+The drum pads send General MIDI notes by default, which a GM kit answers but many modern
+kits (an Ableton Drum Rack, Battery, a sampler) do not. Right-click a pad on the Play
+page and choose **MIDI learn**, then play the note on your controller: the pad's corner
+shows the new note, and both rails follow it because they share one kit.
+
+The mapping is saved with the project and restored when it is reopened. **Reset to GM
+note** in the same menu goes back to the default. For the note to arrive, the track's
+MIDI input has to reach sightline - monitor the track, or place sightline as a MIDI
+effect in front of the kit.
+
+### Tracking test
+
+The **Tracking test** switch just below the overlay switch on the Play page draws what the detector
+sees over the camera picture: teal is skin, amber is frame motion, bright cells are both,
+and the shaded middle is the band that is never searched. Each hand's normalised
+position, the target under it and the camera fps are shown in the corner.
+
+Use it when a rail fires on its own (a warm wall or a sleeve shows up in the mask) or
+refuses to fire (the mask never covers the hand, or the hand sits outside the rails).
+
+## Licence
+
+sightline is released under the [GNU Affero General Public License v3.0](LICENSE)
+(AGPL-3.0). It links JUCE 8, used under JUCE's AGPL option, and the source for every
+release is this repository.
 
 ## Layout of the source
 

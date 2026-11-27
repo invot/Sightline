@@ -122,9 +122,9 @@ jobs:
           set -euo pipefail
           out=build/SightLine_artefacts/Release
           mkdir -p dist
-          (cd "$out/VST3" && 7z a -tzip -bso0 "$GITHUB_WORKSPACE/dist/SightLine-VST3-Windows.zip" SightLine.vst3)
+          (cd "$out/VST3" && 7z a -tzip -bso0 "$GITHUB_WORKSPACE/dist/sightline-VST3-Windows.zip" sightline.vst3)
           iscc="$(cygpath -u "$ISCC")"
-          "$iscc" installer/SightLine.iss
+          "$iscc" installer/sightline.iss
           ls -la dist
 
       - name: Publish the "latest" release
@@ -136,8 +136,8 @@ jobs:
           {
             echo "Built automatically from \`$short\` on \`main\`: $(git log -1 --format=%s)"
             echo
-            echo "- **SightLine-Setup-Windows.exe**: installs the standalone app and \`SightLine.vst3\` into \`C:\\Program Files\\Common Files\\VST3\`."
-            echo "- **SightLine-VST3-Windows.zip**: the VST3 bundle on its own; unzip into \`C:\\Program Files\\Common Files\\VST3\`."
+            echo "- **sightline-Setup-Windows.exe**: installs the standalone app and \`sightline.vst3\` into \`C:\\Program Files\\Common Files\\VST3\`."
+            echo "- **sightline-VST3-Windows.zip**: the VST3 bundle on its own; unzip into \`C:\\Program Files\\Common Files\\VST3\`."
             echo
             echo "This release is replaced on every push to \`main\`."
           } > notes.md
@@ -150,5 +150,5 @@ jobs:
             --title "latest" \
             --notes-file notes.md \
             --latest \
-            dist/SightLine-Setup-Windows.exe \
-            dist/SightLine-VST3-Windows.zip
+            dist/sightline-Setup-Windows.exe \
+            dist/sightline-VST3-Windows.zip

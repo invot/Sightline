@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Builds SightLine with the bundled MinGW + CMake + JUCE toolchain.
+# Builds sightline with the bundled MinGW + CMake + JUCE toolchain.
 #
 #   ./build.sh              configure (if needed) and build everything
 #   ./build.sh clean        wipe build/ first
 #   ./build.sh tests        build and run the core tests only
 #
 # Outputs:
-#   build/SightLine_artefacts/Release/VST3/SightLine.vst3
-#   build/SightLine_artefacts/Release/Standalone/SightLine.exe
+#   build/SightLine_artefacts/Release/VST3/sightline.vst3
+#   build/SightLine_artefacts/Release/Standalone/sightline.exe
 
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -52,6 +52,6 @@ else
     cmake --build build -j"$(nproc)"
     echo
     echo "Built:"
-    ls -1 build/SightLine_artefacts/Release/VST3/SightLine.vst3 2>/dev/null || true
-    ls -1 build/SightLine_artefacts/Release/Standalone/SightLine.exe 2>/dev/null || true
+    ls -1 build/SightLine_artefacts/Release/VST3/sightline.vst3 2>/dev/null || true
+    ls -1 build/SightLine_artefacts/Release/Standalone/sightline.exe 2>/dev/null || true
 fi

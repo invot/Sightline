@@ -62,7 +62,7 @@ namespace
 
 int main()
 {
-    std::printf ("SightLine core tests\n");
+    std::printf ("sightline core tests\n");
 
     // ---- the keyboard overlay ---------------------------------------------
     {
@@ -144,6 +144,18 @@ int main()
             gmNotes = gmNotes && z.note >= 35 && z.note <= 59;
 
         check (gmNotes, "drums: targets use General MIDI percussion numbers");
+
+        // A learned note replaces the GM default on both rails.
+        auto custom = sl::defaultDrumNotes();
+        custom[0] = 41;
+        const auto mapped = sl::buildZones (sl::Overlay::Drums, 0, sl::ScaleType::Major, 0, custom);
+
+        check (mapped.zones[0].note == 41
+                   && mapped.zones[(size_t) sl::numDrumPads].note == 41,
+               "drums: a learned note applies to both rails");
+        check (mapped.zones[0].subLabel == "41", "drums: the pad shows its learned note");
+        check (mapped.zones[1].note == sl::drumPadNote (1),
+               "drums: pads without a mapping keep their GM note");
     }
 
     // ---- dwell gating -------------------------------------------------------

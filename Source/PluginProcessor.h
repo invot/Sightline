@@ -43,7 +43,7 @@ public:
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override                { return true; }
 
-    const juce::String getName() const override    { return "SightLine"; }
+    const juce::String getName() const override    { return "sightline"; }
     bool acceptsMidi() const override              { return true; }
     bool producesMidi() const override             { return true; }
     bool isMidiEffect() const override             { return false; }
@@ -75,6 +75,20 @@ public:
     /** Plays a note through the MIDI out (velocity < 0 sends the note off).
         Used by the Setup page's test button. */
     void playPreviewNote (int note, int channel, int velocity);
+
+    //==========================================================================
+    /** The note each drum pad plays, including any learned overrides. */
+    DrumNotes drumNotes() const;
+    int  drumNote (int pad) const;
+    void setDrumNote (int pad, int note);
+    void resetDrumNote (int pad);
+
+    /** Arms a pad: the next note-on reaching the plugin becomes that pad's
+        note. The UI polls takeLearnedNote() on the message thread. */
+    void startDrumLearn (int pad);
+    void cancelDrumLearn();
+    int  learningPad() const noexcept { return learnPad.load(); }
+    bool takeLearnedNote (int& pad, int& note);
 
     const std::vector<Zone>& getZones() const noexcept { return gestures.getZones(); }
     LiveState getLiveState() const;
@@ -158,6 +172,9 @@ private:
     EventQueue queue;
     InternalSynth synth;
     LiveState live;
+
+    std::atomic<int> learnPad { -1 }, learnedPad { -1 }, learnedNote { -1 };
+    int lastDrumHash = 0;
 
     int lastOverlay = -1, lastRoot = -1, lastScale = -1, lastOctave = -1;
     int lastMelodyChan = -1, lastDrumChan = -1;

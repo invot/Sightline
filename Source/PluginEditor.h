@@ -26,6 +26,7 @@ public:
     void feedFrame (const juce::Image&);
 
     ui::TabBar* getTabBarForTesting() noexcept { return &tabs; }
+    ui::StagePanel* getStageForTesting() noexcept { return &stage; }
 
 private:
     void timerCallback() override;
@@ -56,6 +57,7 @@ private:
 
     juce::CriticalSection frameLock;
     juce::Image pendingFrame;
+    juce::Image mirroredFrame;   // reused when the view is mirrored
 
     HandTracker tracker;
     std::vector<uint8_t> rgbScratch;   // tracker wants packed RGB; JUCE stores BGR

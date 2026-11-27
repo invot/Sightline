@@ -26,9 +26,10 @@ namespace
             ++failures;
     }
 
-    /** A drawn "webcam" frame: a dim room, a person in the middle and a hand out
-        at the left rail. Used instead of a real camera in tests and snapshots. */
-    juce::Image makeCameraImage (int w, int h, float handX, float handY)
+    /** A drawn "webcam" frame: a dim room, optionally with a hand out at the
+        left rail. Used instead of a real camera in tests and snapshots. Pass a
+        negative handX for the empty room alone. */
+    juce::Image makeCameraImage (int w, int h, float handX = -1.0f, float handY = -1.0f)
     {
         juce::Image img (juce::Image::RGB, w, h, true);
         juce::Graphics g (img);
@@ -43,35 +44,22 @@ namespace
         g.setGradientFill (glow);
         g.fillRect (0, 0, w, h);
 
-        // Person: shoulders and head, cool and desaturated.
-        g.setColour (juce::Colour (0xff3a4148));
-        g.fillEllipse ((float) w * 0.5f - 92.0f, (float) h * 0.30f, 184.0f, 210.0f);
-
-        g.setColour (juce::Colour (0xff4d565f));
-        juce::Path shoulders;
-        shoulders.addRoundedRectangle ((float) w * 0.5f - 230.0f, (float) h * 0.62f, 460.0f, (float) h * 0.5f, 120.0f);
-        g.fillPath (shoulders);
-
-        // Face, so the tracker has to ignore a skin-coloured centre.
-        g.setColour (juce::Colour (0xffd6a689));
-        g.fillEllipse ((float) w * 0.5f - 62.0f, (float) h * 0.255f, 124.0f, 148.0f);
-
-        g.setColour (juce::Colour (0xff2b3036));
-        g.fillEllipse ((float) w * 0.5f - 40.0f, (float) h * 0.245f, 80.0f, 44.0f);
-
         // The hand out at the rail, plus a forearm running off the edge.
-        const float hx = handX * (float) w;
-        const float hy = handY * (float) h;
+        if (handX >= 0.0f)
+        {
+            const float hx = handX * (float) w;
+            const float hy = handY * (float) h;
 
-        g.setColour (juce::Colour (0xffcf9d80));
-        g.fillRoundedRectangle (hx - 60.0f, hy + 30.0f, 130.0f, 54.0f, 24.0f);
-        g.fillEllipse (hx - 46.0f, hy - 40.0f, 92.0f, 96.0f);
+            g.setColour (juce::Colour (0xffcf9d80));
+            g.fillRoundedRectangle (hx - 60.0f, hy + 30.0f, 130.0f, 54.0f, 24.0f);
+            g.fillEllipse (hx - 46.0f, hy - 40.0f, 92.0f, 96.0f);
 
-        juce::ColourGradient fingers (juce::Colour (0xffe0b295), hx, hy,
-                                      juce::Colour (0xffc08e73), hx + 40.0f, hy + 40.0f, false);
-        g.setGradientFill (fingers);
-        g.fillEllipse (hx - 34.0f, hy + 6.0f, 30.0f, 62.0f);
-        g.fillEllipse (hx + 6.0f, hy + 10.0f, 28.0f, 58.0f);
+            juce::ColourGradient fingers (juce::Colour (0xffe0b295), hx, hy,
+                                          juce::Colour (0xffc08e73), hx + 40.0f, hy + 40.0f, false);
+            g.setGradientFill (fingers);
+            g.fillEllipse (hx - 34.0f, hy + 6.0f, 30.0f, 62.0f);
+            g.fillEllipse (hx + 6.0f, hy + 10.0f, 28.0f, 58.0f);
+        }
 
         g.setColour (juce::Colours::black.withAlpha (0.18f));
         g.fillRect (0, 0, w, 7);
@@ -218,6 +206,43 @@ int main()
 
         check (drumOk, "[9] a drum pad plays its GM note on the drum channel");
 
+        // ---- per-pad mapping, MIDI learn and state --------------------------
+        proc.setDrumNote (0, 41);
+        check (proc.getZones()[0].note == 41, "[9a] a drum pad takes a learned note");
+        check (proc.getZones()[(size_t) sl::numDrumPads].note == 41,
+               "[9b] the other rail plays the same mapping");
+
+        proc.startDrumLearn (2);
+
+        juce::MidiBuffer learnMidi;
+        learnMidi.addEvent (juce::MidiMessage::noteOn (1, 55, (juce::uint8) 100), 0);
+        juce::AudioBuffer<float> learnAudio (2, 512);
+        learnAudio.clear();
+        proc.processBlock (learnAudio, learnMidi);
+
+        int learnedPad = -1, learnedNote = -1;
+        check (proc.takeLearnedNote (learnedPad, learnedNote)
+                   && learnedPad == 2 && learnedNote == 55,
+               "[9c] MIDI learn captures the next incoming note");
+
+        proc.setDrumNote (learnedPad, learnedNote);
+        check (proc.getZones()[2].note == 55, "[9d] the learned note reaches the pad");
+
+        juce::MemoryBlock pluginState;
+        proc.getStateInformation (pluginState);
+
+        sl::SightLineProcessor restored;
+        restored.setStateInformation (pluginState.getData(), (int) pluginState.getSize());
+
+        check (restored.getZones().size() > 2
+                   && restored.getZones()[0].note == 41
+                   && restored.getZones()[2].note == 55,
+               "[9e] drum mapping survives save and reload");
+
+        restored.resetDrumNote (0);
+        check (restored.getZones()[0].note == sl::drumPadNote (0),
+               "[9f] resetting a pad returns it to its GM note");
+
         proc.updateHands ({}, {}, t0 + 900.0);
         proc.releaseResources();
     }
@@ -287,8 +312,19 @@ int main()
 
         check (proc->getLiveState().handSeen[1], "[13] the editor tracks the hand in the frame");
         check (proc->getLiveState().activeNote[1] >= 0, "[14] the hand is holding a note");
+        check (sight != nullptr && sight->getStageForTesting()->hasTrackingMask(),
+               "[14a] the tracking test receives the detector's mask");
 
         const auto snapDir = juce::SystemStats::getEnvironmentVariable ("SIGHTLINE_SNAPSHOT_DIR", {});
+
+        // The checks above need a hand for the tracker to find; the pictures do
+        // not, so the stage shows the empty room while the hand stays "held".
+        const auto showEmptyRoom = [&]
+        {
+            if (sight != nullptr)
+                if (auto* stage = sight->getStageForTesting())
+                    stage->setFrame (makeCameraImage (960, 540));
+        };
 
         if (snapDir.isNotEmpty())
         {
@@ -307,7 +343,18 @@ int main()
                 {
                     tabs->setSelected (0, true);
                     juce::MessageManager::getInstance()->runDispatchLoopUntil (60);
+                    showEmptyRoom();
                     save ("play");
+
+                    // The same frame with the tracking mask over it.
+                    if (auto* stage = sight->getStageForTesting())
+                    {
+                        stage->setTrackingDebug (true);
+                        sight->feedFrame (makeCameraImage (960, 540, 0.09f, 0.55f));
+                        juce::MessageManager::getInstance()->runDispatchLoopUntil (60);
+                        save ("play-tracking");
+                        stage->setTrackingDebug (false);
+                    }
 
                     // The same frame with the drum kit on the rails.
                     if (auto* overlayParam = dynamic_cast<juce::AudioParameterChoice*> (proc->apvts.getParameter ("overlay")))
@@ -320,7 +367,16 @@ int main()
                         juce::Thread::sleep (140);
                         sight->feedFrame (frame);
                         juce::MessageManager::getInstance()->runDispatchLoopUntil (60);
+                        showEmptyRoom();
                         save ("play-drums");
+
+                        // Armed MIDI learn: the pad is highlighted and the
+                        // banner says what to do.
+                        proc->startDrumLearn (1);
+                        juce::MessageManager::getInstance()->runDispatchLoopUntil (60);
+                        showEmptyRoom();
+                        save ("play-learn");
+                        proc->cancelDrumLearn();
 
                         *overlayParam = 0;
                         proc->syncZones();

@@ -15,11 +15,23 @@ public:
 
     void paint (juce::Graphics&) override;
     void resized() override;
+    void mouseDown (const juce::MouseEvent&) override;
 
     /** Called from the editor's timer with the newest camera frame. */
     void setFrame (const juce::Image&);
     void setCameraStatus (const juce::String& name, bool live);
     void setOverlayText (const juce::String&);
+
+    /** The tracker's debug mask for the newest frame: 0 empty, 90 motion,
+        170 skin, 255 both. Kept while the view is off, so switching it on
+        shows the last analysed frame immediately. */
+    void setTrackingMask (const std::vector<uint8_t>& values, int width, int height);
+
+    /** Draws the mask, the two search regions and the hand/fps readout over the
+        camera picture. */
+    void setTrackingDebug (bool shouldShow);
+    bool isTrackingDebug() const noexcept { return trackingDebug; }
+    bool hasTrackingMask() const noexcept { return maskW > 0 && ! mask.empty(); }
 
     /** Follows the overlay parameter when it changes from outside the switch
         (automation, undo, preset load). */
@@ -36,6 +48,11 @@ private:
     void drawPlaceholder (juce::Graphics&, juce::Rectangle<float>);
     void drawRails (juce::Graphics&, juce::Rectangle<float>);
     void drawHands (juce::Graphics&, juce::Rectangle<float>);
+    void rebuildMaskImage();
+    void drawTrackingOverlay (juce::Graphics&, juce::Rectangle<float>);
+    void drawTrackingReadout (juce::Graphics&, juce::Rectangle<float>);
+    void drawLearnBanner (juce::Graphics&, juce::Rectangle<float>, int pad);
+    void showPadMenu (int pad);
 
     /** The part of a frame that is visible on the stage, in 0..1 frame units. */
     Rect visibleFrameArea (int frameWidth, int frameHeight) const;
@@ -53,6 +70,12 @@ private:
     bool cameraLive = false;
     juce::String overlayText;
     int shownOverlay = -1;
+
+    TogglePill trackingPill { "Tracking test", pal::yellow };
+    bool trackingDebug = false;
+    std::vector<uint8_t> mask;
+    int maskW = 0, maskH = 0;
+    juce::Image maskImage;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (StagePanel)
 };

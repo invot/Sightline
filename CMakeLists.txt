@@ -35,6 +35,7 @@ set(SL_CORE_SOURCES
 # ---------------------------------------------------------------------------
 set(SL_DEPS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/.tools" CACHE PATH "Where downloaded dependencies are kept")
 option(SL_HAND_MODEL "Track hands with the MediaPipe landmark model (ONNX Runtime)" ON)
+option(SL_REQUIRE_HAND_MODEL "Fail configure when the hand landmark model cannot be prepared (release builds)" OFF)
 
 set(SL_ORT_VERSION 1.31.1)
 set(SL_ORT_URL "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/${SL_ORT_VERSION}/microsoft.ml.onnxruntime.${SL_ORT_VERSION}.nupkg")
@@ -49,22 +50,101 @@ set(SL_MODEL_FILES
     "hand_landmark.onnx|${SL_HF}/handpose_estimation_mediapipe/resolve/4b2a0b446e5cf2f11fb6b2c7251091c035d2c1f7/handpose_estimation_mediapipe_2023feb.onnx|db0898ae717b76b075d9bf563af315b29562e11f8df5027a1ef07b02bef6d81c"
     "LICENSE|${SL_HF}/handpose_estimation_mediapipe/resolve/4b2a0b446e5cf2f11fb6b2c7251091c035d2c1f7/LICENSE|58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd")
 
+# CMake's own file(DOWNLOAD) cannot verify TLS against every host: on the
+# GitHub Windows runners every https fetch fails with curl error 60 ("SSL peer
+# certificate or SSH remote key was not OK"), and EXPECTED_HASH made that a
+# fatal configure error even though the hand model is optional. Download
+# through curl instead - it ships with Windows 10+ and with Git for Windows -
+# fall back to file(DOWNLOAD) when curl is missing or fails, and verify the
+# pinned hash by hand so a blocked network only costs the model, not the
+# configure.
+find_program(SL_CURL_EXECUTABLE curl)
+
+# sl_download_file(<url> <dest> <sha256> <out-ok>): leaves <dest> in place and
+# sets <out-ok> to ON only when its contents match the pinned hash.
+function(sl_download_file url dest expectedHash outOk)
+    set(ok OFF)
+
+    if (EXISTS "${dest}")
+        file(SHA256 "${dest}" existingHash)
+        if (existingHash STREQUAL expectedHash)
+            set(ok ON)
+        else()
+            message(WARNING "${dest} does not match its pinned SHA-256; fetching it again")
+            file(REMOVE "${dest}")
+        endif()
+    endif()
+
+    if (NOT ok)
+        get_filename_component(dir "${dest}" DIRECTORY)
+        file(MAKE_DIRECTORY "${dir}")
+        set(part "${dest}.part")
+        file(REMOVE "${part}")
+        message(STATUS "Downloading ${url}")
+
+        set(downloaded OFF)
+
+        if (SL_CURL_EXECUTABLE)
+            execute_process(
+                COMMAND "${SL_CURL_EXECUTABLE}" -fsSL --retry 4 --retry-delay 3 --retry-all-errors
+                        -o "${part}" "${url}"
+                RESULT_VARIABLE curlCode)
+            if (curlCode STREQUAL "0")
+                set(downloaded ON)
+            else()
+                message(WARNING "curl could not download ${url} (exit ${curlCode})")
+            endif()
+        endif()
+
+        if (NOT downloaded)
+            file(DOWNLOAD "${url}" "${part}" STATUS dlStatus)
+            list(GET dlStatus 0 dlCode)
+            if (dlCode EQUAL 0)
+                set(downloaded ON)
+            else()
+                message(WARNING "Download of ${url} failed (${dlStatus})")
+            endif()
+        endif()
+
+        if (downloaded)
+            file(SHA256 "${part}" actualHash)
+            if (actualHash STREQUAL expectedHash)
+                file(RENAME "${part}" "${dest}")
+                set(ok ON)
+            else()
+                message(WARNING "${url} does not match its pinned SHA-256 (got ${actualHash})")
+            endif()
+        endif()
+
+        if (NOT ok)
+            file(REMOVE "${part}")
+        endif()
+    endif()
+
+    set(${outOk} ${ok} PARENT_SCOPE)
+endfunction()
+
 set(SL_HAVE_ORT OFF)
 
 if (SL_HAND_MODEL AND WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8)
-    if (NOT EXISTS "${SL_ORT_DLL}")
-        set(nupkg "${SL_DEPS_DIR}/dl/onnxruntime-${SL_ORT_VERSION}.nupkg")
-        message(STATUS "Downloading ONNX Runtime ${SL_ORT_VERSION} (about 160 MB, once)")
-        file(DOWNLOAD "${SL_ORT_URL}" "${nupkg}" EXPECTED_HASH SHA256=${SL_ORT_SHA256} STATUS dlStatus)
-        list(GET dlStatus 0 dlCode)
+    set(ortOk OFF)
 
-        if (dlCode EQUAL 0)
+    if (EXISTS "${SL_ORT_DLL}" AND EXISTS "${SL_ORT_DIR}/build/native/include/onnxruntime_c_api.h")
+        set(ortOk ON)
+    else()
+        set(nupkg "${SL_DEPS_DIR}/dl/onnxruntime-${SL_ORT_VERSION}.nupkg")
+        message(STATUS "Preparing ONNX Runtime ${SL_ORT_VERSION} (about 160 MB, once)")
+        sl_download_file("${SL_ORT_URL}" "${nupkg}" "${SL_ORT_SHA256}" nupkgOk)
+
+        if (nupkgOk)
             file(ARCHIVE_EXTRACT INPUT "${nupkg}" DESTINATION "${SL_ORT_DIR}"
                  PATTERNS "build/native/include/*" "runtimes/win-x64/native/onnxruntime.dll"
                           "LICENSE" "ThirdPartyNotices.txt")
+            # Only the extracted pieces are kept; the archive itself is 160 MB.
             file(REMOVE "${nupkg}")
+            set(ortOk ON)
         else()
-            message(WARNING "ONNX Runtime download failed (${dlStatus})")
+            message(WARNING "ONNX Runtime ${SL_ORT_VERSION} could not be prepared; hand tracking will be limited")
         endif()
     endif()
 
@@ -76,28 +156,23 @@ if (SL_HAND_MODEL AND WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8)
         list(GET parts 1 url)
         list(GET parts 2 hash)
 
-        if (NOT EXISTS "${SL_MODEL_DIR}/${name}")
-            message(STATUS "Downloading ${name}")
-            file(DOWNLOAD "${url}" "${SL_MODEL_DIR}/${name}.part" EXPECTED_HASH SHA256=${hash} STATUS dlStatus)
-            list(GET dlStatus 0 dlCode)
-
-            if (dlCode EQUAL 0)
-                file(RENAME "${SL_MODEL_DIR}/${name}.part" "${SL_MODEL_DIR}/${name}")
-            else()
-                file(REMOVE "${SL_MODEL_DIR}/${name}.part")
-                message(WARNING "Download of ${name} failed (${dlStatus})")
-                set(modelsOk OFF)
-            endif()
+        sl_download_file("${url}" "${SL_MODEL_DIR}/${name}" "${hash}" modelOk)
+        if (NOT modelOk)
+            message(WARNING "${name} could not be prepared; hand tracking will be limited")
+            set(modelsOk OFF)
         endif()
     endforeach()
 
-    if (modelsOk AND EXISTS "${SL_ORT_DLL}" AND EXISTS "${SL_ORT_DIR}/build/native/include/onnxruntime_c_api.h")
+    if (ortOk AND modelsOk)
         set(SL_HAVE_ORT ON)
     endif()
 endif()
 
 if (SL_HAVE_ORT)
     message(STATUS "Hand landmark model: on (ONNX Runtime ${SL_ORT_VERSION})")
+elseif (SL_REQUIRE_HAND_MODEL)
+    message(FATAL_ERROR "Hand landmark model: off, but SL_REQUIRE_HAND_MODEL is set. "
+                        "Fix the download problems listed above, or build without it using -DSL_HAND_MODEL=OFF.")
 else()
     message(WARNING "Hand landmark model: off, the basic tracker will be used")
 endif()

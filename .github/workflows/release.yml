@@ -88,6 +88,12 @@ jobs:
           unset RC
           gcc --version | head -1
 
+          # CMake's own file(DOWNLOAD) cannot verify TLS on this image (curl
+          # error 60), so give it the curl from Git for Windows, which can:
+          # the hand-model downloads then happen through curl. A release has to
+          # contain the hand model, so a failed download fails the configure.
+          export SL_CURL="$(cygpath -m "$(command -v curl)")"
+
           cmake -S . -B build -G "MinGW Makefiles" \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER="$tools/mingw64/bin/gcc.exe" \
@@ -96,6 +102,8 @@ jobs:
             -DCMAKE_MAKE_PROGRAM="$tools/mingw64/bin/mingw32-make.exe" \
             -DSL_JUCE_DIR="$tools/JUCE-8.0.6" \
             -DSL_DEPS_DIR="$(cygpath -m "$RUNNER_TEMP/deps")" \
+            -DSL_CURL_EXECUTABLE="$SL_CURL" \
+            -DSL_REQUIRE_HAND_MODEL=ON \
             -DCMAKE_CXX_FLAGS="$CXXFLAGS"
 
       - name: Build

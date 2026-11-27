@@ -40,6 +40,13 @@ enum class Overlay
 
 constexpr int numOverlays = 3;
 
+/** What the cursor follows with the landmark model. */
+enum class AimMode
+{
+    PinchPoint = 0,   // between thumb and index tip; pinch to play
+    Fingertip = 1     // index fingertip, only while pointing; thumb click to play
+};
+
 const char* overlayName (Overlay o) noexcept;
 
 /** MIDI note -> "C4", "F#3", ... */
@@ -62,6 +69,9 @@ struct HandSample
     float y = 0.0f;
     float size = 0.0f;     // blob area as a fraction of the frame
     float confidence = 0.0f;
+    bool hasPinch = false; // the tracker can see fingers (the landmark model)
+    bool pinching = false; // the trigger is closed: a pinch, or a thumb click while pointing
+    bool pointing = false; // index finger out, others curled
 };
 
 /** One MIDI message, queued from the gesture engine to the audio thread. */

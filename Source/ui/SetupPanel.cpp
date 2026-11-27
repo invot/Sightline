@@ -10,6 +10,8 @@ SetupPanel::SetupPanel (SightLineProcessor& p, std::function<void()> onCameraCha
     addAndMakeVisible (cameraCombo);
     addAndMakeVisible (mirrorPill);
     addAndMakeVisible (builtInPill);
+    addAndMakeVisible (pinchPill);
+    addAndMakeVisible (aimCombo);
     addAndMakeVisible (sensitivity);
     addAndMakeVisible (dwell);
     addAndMakeVisible (release);
@@ -32,6 +34,11 @@ SetupPanel::SetupPanel (SightLineProcessor& p, std::function<void()> onCameraCha
 
     mirrorPill.attach (proc.apvts, "mirror");
     builtInPill.attach (proc.apvts, "builtIn");
+    pinchPill.attach (proc.apvts, "pinch");
+    pinchPill.button.setTooltip ("On: aim at a target, then pinch (or, when aiming with a pointing finger, "
+                                 "press the thumb against the index finger) to play it. "
+                                 "Off: resting on a target for the dwell time plays it.");
+    aimCombo.attach (proc.apvts, "aim");
 
     testButton.onClick = [this] { if (testNote) testNote(); };
     testButton.setColour (juce::TextButton::buttonColourId, pal::panelHi);
@@ -124,9 +131,11 @@ void SetupPanel::paint (juce::Graphics& g)
     g.drawFittedText ("The picture never leaves this machine: frames are analysed here and thrown away.",
                       cameraNoteArea, juce::Justification::topLeft, 3);
 
-    g.drawFittedText ("Dwell is how long a hand rests on a target before it counts. "
+    g.drawFittedText ("Thumb + index aims between the two fingertips: pinch to play, open to stop. "
+                      "Pointing finger aims with the index tip while you point: press the thumb to the finger to play. "
+                      "Dwell is how long a hand rests on a target before it counts. "
                       "Release is how long the note rings after the hand leaves.",
-                      playNoteArea, juce::Justification::topLeft, 3);
+                      playNoteArea, juce::Justification::topLeft, 5);
 
     juce::String midiText;
 
@@ -169,6 +178,14 @@ void SetupPanel::resized()
     // ---- playing ---------------------------------------------------------
     auto pArea = playCard.reduced (16, 0);
     pArea.removeFromTop (58);
+    {
+        auto row = pArea.removeFromTop (58);
+        aimCombo.setBounds (row.removeFromLeft (row.getWidth() / 2 - 6));
+        row.removeFromLeft (12);
+        pinchPill.setBounds (row.removeFromBottom (30).withWidth (juce::jmin (row.getWidth(), 150)));
+    }
+
+    pArea.removeFromTop (12);
 
     for (auto* row : { &dwell, &release, &velocity, &opacity })
     {

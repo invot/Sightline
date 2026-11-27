@@ -20,6 +20,10 @@ struct LiveState
     float handX[2] { 0.0f, 0.0f };
     float handY[2] { 0.0f, 0.0f };
     bool handSeen[2] { false, false };
+    bool hasPinch[2] { false, false };    // the tracker sees fingers
+    bool pinching[2] { false, false };
+    bool pointing[2] { false, false };    // index finger out (landmark model)
+    bool hovering[2] { false, false };    // trigger open under pinch-to-play: aims, doesn't play
     int activeNote[2] { -1, -1 };
     int hovered[2] { -1, -1 };
     float dwell[2] { 0.0f, 0.0f };
@@ -104,6 +108,8 @@ public:
     float    sensitivity() const;
     float    overlayOpacity() const;
     bool     isMirrored() const;
+    bool     pinchToPlay() const;
+    AimMode  aimMode() const;
     bool     builtInSoundOn() const;
     int      cameraIndex() const;
 
@@ -167,6 +173,8 @@ private:
         std::atomic<float>* builtIn = nullptr;
         std::atomic<float>* camera = nullptr;
         std::atomic<float>* gain = nullptr;
+        std::atomic<float>* pinch = nullptr;
+        std::atomic<float>* aim = nullptr;
     } p;
 
     EventQueue queue;

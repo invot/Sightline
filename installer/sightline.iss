@@ -37,6 +37,10 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 
 [Files]
 Source: "..\build\SightLine_artefacts\Release\Standalone\sightline.exe"; DestDir: "{app}"; Flags: ignoreversion
+; The hand landmark model runs on ONNX Runtime, which sits beside the app (and
+; inside the VST3 bundle, which the line below copies whole).
+Source: "..\build\SightLine_artefacts\Release\Standalone\onnxruntime.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\build\SightLine_artefacts\Release\Standalone\*.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\build\SightLine_artefacts\Release\VST3\sightline.vst3\*"; DestDir: "{commoncf64}\VST3\sightline.vst3"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]

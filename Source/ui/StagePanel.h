@@ -27,6 +27,21 @@ public:
         shows the last analysed frame immediately. */
     void setTrackingMask (const std::vector<uint8_t>& values, int width, int height);
 
+    /** The landmark model's 21 points per hand, in 0..1 stage coordinates,
+        index 0 = left rail. Drawn while the tracking test is on. */
+    struct Skeleton
+    {
+        bool valid = false;
+        bool pinching = false;   // the trigger (pinch or thumb click) is closed
+        bool pointing = false;
+        juce::Point<float> points[HandPose::numPoints];
+    };
+
+    void setSkeletons (const Skeleton (&hands)[2]);
+
+    /** Which tracker is running, for the tracking test readout. */
+    void setTrackerInfo (const juce::String& text, bool usingModel);
+
     /** Draws the mask, the two search regions and the hand/fps readout over the
         camera picture. */
     void setTrackingDebug (bool shouldShow);
@@ -50,6 +65,7 @@ private:
     void drawHands (juce::Graphics&, juce::Rectangle<float>);
     void rebuildMaskImage();
     void drawTrackingOverlay (juce::Graphics&, juce::Rectangle<float>);
+    void drawSkeletons (juce::Graphics&, juce::Rectangle<float>);
     void drawTrackingReadout (juce::Graphics&, juce::Rectangle<float>);
     void drawLearnBanner (juce::Graphics&, juce::Rectangle<float>, int pad);
     void showPadMenu (int pad);
@@ -76,6 +92,9 @@ private:
     std::vector<uint8_t> mask;
     int maskW = 0, maskH = 0;
     juce::Image maskImage;
+    Skeleton skeletons[2];
+    juce::String trackerInfo;
+    bool trackerIsModel = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (StagePanel)
 };

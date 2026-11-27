@@ -46,6 +46,14 @@ jobs:
           path: ${{ runner.temp }}/tools
           key: tools-${{ env.WINLIBS_SHA256 }}-${{ env.JUCE_SHA256 }}-${{ hashFiles('ci/juce-8.0.6-mingw.patch') }}
 
+      # ONNX Runtime and the hand models are downloaded by CMake (pinned by
+      # SHA-256 in CMakeLists.txt); keep them between runs.
+      - name: Cache hand-model dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/deps
+          key: deps-${{ hashFiles('CMakeLists.txt') }}
+
       - name: Download toolchain and JUCE
         if: steps.tools-cache.outputs.cache-hit != 'true'
         run: |
@@ -87,6 +95,7 @@ jobs:
             -DCMAKE_RC_COMPILER="$tools/mingw64/bin/windres.exe" \
             -DCMAKE_MAKE_PROGRAM="$tools/mingw64/bin/mingw32-make.exe" \
             -DSL_JUCE_DIR="$tools/JUCE-8.0.6" \
+            -DSL_DEPS_DIR="$(cygpath -m "$RUNNER_TEMP/deps")" \
             -DCMAKE_CXX_FLAGS="$CXXFLAGS"
 
       - name: Build

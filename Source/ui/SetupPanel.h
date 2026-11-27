@@ -31,6 +31,7 @@ private:
     juce::ComboBox cameraCombo;
     TogglePill mirrorPill { "Mirror", pal::teal };
     TogglePill builtInPill { "Built-in sound", pal::pink };
+    TogglePill pinchPill { "Pinch to play", pal::amber };
 
     SliderRow sensitivity { "Sensitivity", pal::teal, " %" };
     SliderRow dwell       { "Dwell", pal::amber, " ms" };
@@ -41,6 +42,7 @@ private:
 
     LabelledCombo melodyChan { "Melody channel" };
     LabelledCombo drumChan { "Drum channel" };
+    LabelledCombo aimCombo { "Aim with" };
 
     juce::TextButton testButton { "Send a test note" };
 

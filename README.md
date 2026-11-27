@@ -96,24 +96,41 @@ Both rails are live at the same time: one hand per rail, so two notes can sound 
 
 ## Playing
 
-* Hold a hand over a target for the **dwell** time (default 90 ms) and the note starts;
-  it keeps sounding while the hand stays there.
-* Move off the target and the note stops after the **release** window (default 150 ms), so
-  a hand crossing a gap does not chop the note.
-* The key/scale/octave, dwell, release, velocity, sensitivity, overlay opacity, mirroring,
-  channels and the built-in instrument's level are on the Play (overlay switch) and Setup
-  pages. **Send a test note** confirms MIDI is reaching the instrument.
+Hands are tracked with Google's MediaPipe hand models (a palm detector and a 21-point
+hand landmark model, as published in the OpenCV model zoo), run on ONNX Runtime on the
+CPU. Each hand is found anywhere in the picture, its fingers are tracked joint by joint,
+and when there is no hand in view there is no cursor and nothing plays.
 
-The tracker is a heuristic, not machine learning: it looks for skin tones and frame
-motion inside the two side regions only (the face in the middle is outside the search
-area). That keeps it fast and dependency-free, and it copes with a resting hand, but it
-is worth knowing:
+**Aim with** (Setup page) chooses what the cursor follows:
 
-* Strongly coloured walls, warm lamps or a sleeve in frame can be picked up as a hand.
-  Lower **Sensitivity** or move the light if a target fires on its own.
-* A hand fully outside the side regions is ignored by design.
-* A dark or gloved hand may only be found while it moves.
+| Aim with | Cursor | With **Pinch to play** on |
+| --- | --- | --- |
+| **Thumb + index** (default) | The point between the thumb and index fingertips | Aim, then touch thumb and index finger together to play. Open them to stop. |
+| **Pointing finger** | The index fingertip, shown only while you point (index out, other fingers curled) | Point at a target, then press the thumb against the side of the index finger, like pulling a trigger. |
+
+* With **Pinch to play** on, an open hand only aims: the target under the cursor lights
+  up but nothing sounds until the pinch (or thumb press) closes, and the note starts
+  at once. Sliding a closed pinch onto another target moves the note after the dwell
+  time. Pinch to play is the most accurate way to play, because the note only starts
+  when you mean it to.
+* With **Pinch to play** off, it works as before: hold the cursor on a target for the
+  **dwell** time (default 90 ms) and the note starts. Moving off ends it after the
+  **release** window (default 150 ms), so a hand crossing a gap does not chop the note.
+* In **Pointing finger** mode an open hand or a fist shows no cursor at all, so a hand
+  resting in view can never select a target.
+* The key/scale/octave, dwell, release, velocity, overlay opacity, mirroring, channels
+  and the built-in instrument's level are on the Play (overlay switch) and Setup pages.
+  **Send a test note** confirms MIDI is reaching the instrument.
 * Mirroring is on by default, matching how people expect a webcam to behave.
+
+### The basic tracker
+
+If ONNX Runtime can't be loaded (`onnxruntime.dll` missing, or the Microsoft Visual C++
+runtime it needs isn't installed), sightline falls back to its original heuristic
+tracker and says so in the **Tracking test** card. That tracker looks for skin tones and
+frame motion inside the two side regions only, so warm walls, lamps or a sleeve can be
+picked up as a hand (lower **Sensitivity**, which only affects this tracker), and it has
+no pinch or pointing: a resting hand plays after the dwell time.
 
 ### Drum mapping
 
@@ -129,19 +146,27 @@ effect in front of the kit.
 
 ### Tracking test
 
-The **Tracking test** switch just below the overlay switch on the Play page draws what the detector
-sees over the camera picture: teal is skin, amber is frame motion, bright cells are both,
-and the shaded middle is the band that is never searched. Each hand's normalised
-position, the target under it and the camera fps are shown in the corner.
+The **Tracking test** switch just below the overlay switch on the Play page draws each
+tracked hand's skeleton over the camera picture (teal for the left rail, pink for the
+right). The thumb and index tips turn yellow while they pinch, and the index tip turns
+white while the hand points. The card shows each hand's position, whether it is open,
+pinching or pointing, the target under it, the camera fps and which tracker is running.
 
-Use it when a rail fires on its own (a warm wall or a sleeve shows up in the mask) or
-refuses to fire (the mask never covers the hand, or the hand sits outside the rails).
+With the basic tracker it shows that tracker's mask instead: teal is skin, amber is frame
+motion, bright cells are both, and the shaded middle is the band that is never searched.
 
 ## Licence
 
 sightline is released under the [GNU Affero General Public License v3.0](LICENSE)
 (AGPL-3.0). It links JUCE 8, used under JUCE's AGPL option, and the source for every
 release is this repository.
+
+Hand tracking uses [ONNX Runtime](https://onnxruntime.ai) (MIT, Microsoft's
+`Microsoft.ML.OnnxRuntime` NuGet package) and the MediaPipe palm detection and hand
+landmark models from the [OpenCV model zoo](https://huggingface.co/opencv) (Apache-2.0).
+CMake downloads them once into `.tools` (pinned by SHA-256), compiles the models into
+the binary, and copies `onnxruntime.dll` and both licences next to the app and into the
+VST3 bundle. Configure with `-DSL_HAND_MODEL=OFF` to build without them.
 
 ## Layout of the source
 

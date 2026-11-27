@@ -48,6 +48,8 @@ SightLineProcessor::SightLineProcessor()
     p.builtIn     = apvts.getRawParameterValue ("builtIn");
     p.camera      = apvts.getRawParameterValue ("cameraIndex");
     p.gain        = apvts.getRawParameterValue ("gain");
+    p.pinch       = apvts.getRawParameterValue ("pinch");
+    p.aim         = apvts.getRawParameterValue ("aim");
 
     syncZones();
 }
@@ -122,6 +124,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout SightLineProcessor::createLa
         ParameterID { "gain", 1 }, "Built-in volume",
         NormalisableRange<float> (0.0f, 100.0f, 1.0f), 65.0f));
 
+    layout.add (std::make_unique<AudioParameterBool> (
+        ParameterID { "pinch", 1 }, "Pinch to play", true));
+
+    layout.add (std::make_unique<AudioParameterChoice> (
+        ParameterID { "aim", 1 }, "Aim with",
+        StringArray { "Thumb + index", "Pointing finger" }, 0));
+
     return layout;
 }
 
@@ -194,6 +203,8 @@ double SightLineProcessor::releaseMs() const   { return (double) p.release->load
 float  SightLineProcessor::sensitivity() const { return p.sensitivity->load() / 100.0f; }
 float  SightLineProcessor::overlayOpacity() const { return p.opacity->load() / 100.0f; }
 bool   SightLineProcessor::isMirrored() const  { return p.mirror->load() > 0.5f; }
+bool   SightLineProcessor::pinchToPlay() const { return p.pinch->load() > 0.5f; }
+AimMode SightLineProcessor::aimMode() const    { return p.aim->load() > 0.5f ? AimMode::Fingertip : AimMode::PinchPoint; }
 bool   SightLineProcessor::builtInSoundOn() const { return p.builtIn->load() > 0.5f; }
 int    SightLineProcessor::cameraIndex() const { return (int) p.camera->load(); }
 
@@ -317,6 +328,7 @@ void SightLineProcessor::syncZones()
     }
 
     gestures.setParams (vel, mel, drum, dwell, release, drums);
+    gestures.setPinchToPlay (pinchToPlay());
 
     lastOverlay = (int) overlay;
     lastRoot = root;
@@ -347,6 +359,10 @@ void SightLineProcessor::updateHands (const HandSample& left, const HandSample& 
         const auto& h = s == 0 ? left : right;
 
         live.handSeen[s] = h.detected;
+        live.hasPinch[s] = h.detected && h.hasPinch;
+        live.pinching[s] = h.detected && h.pinching;
+        live.pointing[s] = h.detected && h.pointing;
+        live.hovering[s] = gestures.isHovering (s);
         live.handX[s] = h.x;
         live.handY[s] = h.y;
         live.dwell[s] = gestures.dwellProgress (s, nowMs);

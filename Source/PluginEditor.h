@@ -32,10 +32,16 @@ public:
         hardware attached. */
     void setCameraLiveForTesting (bool live) { cameraLiveForTesting = live; repaint(); }
 
+    /** True when the landmark model loaded (false: the basic tracker). */
+    bool usesHandModelForTesting() const noexcept { return tracker.usesModel(); }
+
 private:
     void timerCallback() override;
     void imageReceived (const juce::Image&) override;
 
+    /** Loads ONNX Runtime and the hand models; falls back to the heuristic
+        tracker (and says why on the stage) if that fails. */
+    void loadHandModel();
     void openCamera (int index);
     void closeCamera();
     void refreshCameraList();

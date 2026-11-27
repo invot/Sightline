@@ -9,7 +9,7 @@ StagePanel::StagePanel (SightLineProcessor& p)
 {
     addAndMakeVisible (overlaySwitch);
     addAndMakeVisible (trackingPill);
-    trackingPill.button.setTooltip ("Show what the hand tracker sees: skin, motion, the search regions, hand positions and fps");
+    trackingPill.button.setTooltip ("Show what the hand tracker sees: the hand skeleton (or skin and motion for the basic tracker), hand positions and fps");
     trackingPill.button.onClick = [this] { setTrackingDebug (trackingPill.button.getToggleState()); };
     syncOverlay();
 
@@ -138,7 +138,10 @@ void StagePanel::paint (juce::Graphics& g)
             g.fillRect (area);
 
             if (trackingDebug)
+            {
                 drawTrackingOverlay (g, area);
+                drawSkeletons (g, area);
+            }
         }
         else
         {
@@ -240,6 +243,59 @@ void StagePanel::setTrackingMask (const std::vector<uint8_t>& values, int width,
         rebuildMaskImage();
 }
 
+void StagePanel::setSkeletons (const Skeleton (&hands)[2])
+{
+    skeletons[0] = hands[0];
+    skeletons[1] = hands[1];
+}
+
+void StagePanel::setTrackerInfo (const juce::String& text, bool usingModel)
+{
+    trackerInfo = text;
+    trackerIsModel = usingModel;
+    repaint();
+}
+
+void StagePanel::drawSkeletons (juce::Graphics& g, juce::Rectangle<float> area)
+{
+    static constexpr int bones[][2] {
+        { 0, 1 }, { 1, 2 }, { 2, 3 }, { 3, 4 },
+        { 0, 5 }, { 5, 6 }, { 6, 7 }, { 7, 8 },
+        { 5, 9 }, { 9, 10 }, { 10, 11 }, { 11, 12 },
+        { 9, 13 }, { 13, 14 }, { 14, 15 }, { 15, 16 },
+        { 13, 17 }, { 0, 17 }, { 17, 18 }, { 18, 19 }, { 19, 20 }
+    };
+
+    for (int s = 0; s < 2; ++s)
+    {
+        const auto& sk = skeletons[s];
+
+        if (! sk.valid)
+            continue;
+
+        const auto at = [&] (int i)
+        {
+            return juce::Point<float> { area.getX() + sk.points[i].x * area.getWidth(),
+                                        area.getY() + sk.points[i].y * area.getHeight() };
+        };
+
+        const auto colour = s == 0 ? pal::teal : pal::pink;
+        g.setColour (colour.withAlpha (0.8f));
+
+        for (const auto& b : bones)
+            g.drawLine ({ at (b[0]), at (b[1]) }, 1.6f);
+
+        for (int i = 0; i < HandPose::numPoints; ++i)
+        {
+            const bool tip = i == HandPose::thumbTip || i == HandPose::indexTip;
+            const float d = tip || (sk.pointing && i == HandPose::indexTip) ? 7.0f : 4.0f;
+            g.setColour (tip && sk.pinching ? pal::yellow
+                         : (sk.pointing && i == HandPose::indexTip ? juce::Colours::white : colour));
+            g.fillEllipse (juce::Rectangle<float> (d, d).withCentre (at (i)));
+        }
+    }
+}
+
 void StagePanel::setTrackingDebug (bool shouldShow)
 {
     if (trackingDebug == shouldShow)
@@ -294,6 +350,11 @@ void StagePanel::drawTrackingOverlay (juce::Graphics& g, juce::Rectangle<float> 
         return area.getX() + (nx - visible.x) / visible.w * area.getWidth();
     };
 
+    // The landmark model searches the whole picture; only the basic tracker
+    // has search regions and a mask to show.
+    if (trackerIsModel)
+        return;
+
     const float leftEdge = juce::jlimit (area.getX(), area.getRight(), edgeAt (0.37f));
     const float rightEdge = juce::jlimit (area.getX(), area.getRight(), edgeAt (0.63f));
 
@@ -325,7 +386,8 @@ void StagePanel::drawTrackingOverlay (juce::Graphics& g, juce::Rectangle<float> 
 void StagePanel::drawTrackingReadout (juce::Graphics& g, juce::Rectangle<float> area)
 {
     const auto live = proc.getLiveState();
-    auto card = juce::Rectangle<float> (area.getCentreX() - 127.0f, area.getY() + 86.0f, 254.0f, 100.0f);
+    auto card = juce::Rectangle<float> (area.getCentreX() - 127.0f, area.getY() + 86.0f, 254.0f,
+                                        trackerIsModel ? 88.0f : 112.0f);
 
     g.setColour (pal::bg.withAlpha (0.82f));
     g.fillRoundedRectangle (card, 10.0f);
@@ -359,6 +421,10 @@ void StagePanel::drawTrackingReadout (juce::Graphics& g, juce::Rectangle<float> 
             text << "x " << juce::String (live.handX[s], 2)
                  << "  y " << juce::String (live.handY[s], 2);
 
+            if (live.hasPinch[s])
+                text << (live.pointing[s] ? (live.pinching[s] ? "  point+click" : "  point")
+                                          : (live.pinching[s] ? "  pinch" : "  open"));
+
             const auto& zones = proc.getZones();
             const int hovered = live.hovered[s];
 
@@ -377,6 +443,18 @@ void StagePanel::drawTrackingReadout (juce::Graphics& g, juce::Rectangle<float> 
         g.setColour (live.handSeen[s] ? pal::text : pal::dim);
         g.setFont (uiFont (10.5f));
         g.drawText (text, line, juce::Justification::centredLeft, false);
+    }
+
+    if (trackerIsModel || trackerInfo.isNotEmpty())
+    {
+        // Which tracker is running (and, for the basic one, why).
+        g.setColour (trackerIsModel ? pal::teal : pal::amber);
+        g.setFont (uiFont (9.0f));
+        g.drawFittedText (trackerInfo, r.removeFromBottom (13.0f).toNearestInt(),
+                          juce::Justification::centredLeft, 1, 0.8f);
+
+        if (trackerIsModel)
+            return;
     }
 
     // What the mask colours mean.
@@ -599,12 +677,24 @@ void StagePanel::drawHands (juce::Graphics& g, juce::Rectangle<float> area)
 
         const juce::Point<float> p { area.getX() + live.handX[s] * area.getWidth(),
                                      area.getY() + live.handY[s] * area.getHeight() };
-        const float radius = 22.0f;
+        // With the landmark model the cursor sits between thumb and index tip:
+        // it closes into a solid dot while they pinch, and stays an open ring
+        // while the hand is only pointing.
+        const bool pinched = live.hasPinch[s] && live.pinching[s];
+        const float radius = pinched ? 13.0f : 22.0f;
 
-        g.setColour (accent.withAlpha (0.75f));
-        g.drawEllipse (juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (p), 1.6f);
+        g.setColour (accent.withAlpha (pinched ? 0.95f : 0.75f));
+        g.drawEllipse (juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (p),
+                       pinched ? 2.6f : 1.6f);
 
-        g.fillEllipse (juce::Rectangle<float> (5.0f, 5.0f).withCentre (p));
+        if (pinched)
+        {
+            g.setColour (accent.withAlpha (0.35f));
+            g.fillEllipse (juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (p));
+            g.setColour (accent);
+        }
+
+        g.fillEllipse (juce::Rectangle<float> (pinched ? 8.0f : 5.0f, pinched ? 8.0f : 5.0f).withCentre (p));
 
         g.setColour (pal::text.withAlpha (0.55f));
         g.drawLine (p.x - radius - 7.0f, p.y, p.x - radius - 2.0f, p.y, 1.2f);

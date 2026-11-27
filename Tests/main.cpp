@@ -2,13 +2,19 @@
 // the dwell gate, the webcam detector and the standalone instrument.
 
 #include "core/GestureEngine.h"
+#include "core/HandLandmarker.h"
 #include "core/HandTracker.h"
+#include "core/OrtModel.h"
 #include "core/InternalSynth.h"
 #include "core/ZoneMap.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <fstream>
+#include <iterator>
+#include <memory>
+#include <string>
 #include <vector>
 
 namespace
@@ -60,8 +66,18 @@ namespace
     }
 }
 
-int main()
+int main (int, char** argv)
 {
+    // The runtime is copied next to this executable.
+    std::wstring exeDir;
+    {
+        std::string self = argv[0];
+        const auto slash = self.find_last_of ("/\\");
+        self = slash == std::string::npos ? std::string (".\\") : self.substr (0, slash + 1);
+        exeDir.assign (self.begin(), self.end());
+    }
+    (void) exeDir;
+
     std::printf ("sightline core tests\n");
 
     // ---- the keyboard overlay ---------------------------------------------
@@ -267,6 +283,185 @@ int main()
         check (! tracker.side (0).detected && ! tracker.side (1).detected,
                "detector: a bare wall triggers nothing");
     }
+
+    // ---- pinch to play ------------------------------------------------------
+    {
+        sl::GestureEngine engine;
+        engine.setZones (sl::buildZones (sl::Overlay::Keys, 0, sl::ScaleType::Major, 0).zones);
+        engine.setParams (100, 1, 10, 90.0, 140.0, false);
+        engine.setPinchToPlay (true);
+
+        const auto& zone = engine.getZones()[3];
+
+        sl::HandSample hand;
+        hand.detected = true;
+        hand.hasPinch = true;
+        hand.x = zone.bounds.getCentreX();
+        hand.y = zone.bounds.getCentreY();
+
+        std::vector<sl::NoteEvent> events;
+        engine.update (hand, {}, 0.0, events);
+        engine.update (hand, {}, 500.0, events);
+        check (events.empty(), "pinch: an open hand resting on a target plays nothing");
+        check (engine.hoveredZone (0) == 3, "pinch: the open hand still shows which target it aims at");
+        check (engine.dwellProgress (0, 500.0) == 0.0f, "pinch: no dwell ring while only aiming");
+
+        hand.pinching = true;
+        engine.update (hand, {}, 520.0, events);
+        check (events.size() == 1 && events[0].type == sl::NoteEvent::noteOn && events[0].note == zone.note,
+               "pinch: closing the pinch plays at once");
+
+        events.clear();
+        engine.update (hand, {}, 900.0, events);
+        check (events.empty(), "pinch: a held pinch holds the note");
+
+        hand.pinching = false;
+        engine.update (hand, {}, 920.0, events);
+        check (events.size() == 1 && events[0].type == sl::NoteEvent::noteOff,
+               "pinch: opening the pinch ends the note at once");
+
+        // The basic tracker can't see fingers: it keeps the dwell behaviour.
+        events.clear();
+        sl::HandSample blob = hand;
+        blob.hasPinch = false;
+        engine.update (blob, {}, 2000.0, events);
+        engine.update (blob, {}, 2100.0, events);
+        check (events.size() == 1 && events[0].type == sl::NoteEvent::noteOn,
+               "pinch: without finger tracking a resting hand still plays");
+    }
+
+    // ---- landmark model plumbing -------------------------------------------
+    {
+        // A straight copy: a square crop the size of the frame, no rotation.
+        const int w = 64, h = 64;
+        std::vector<uint8_t> rgb ((size_t) w * h * 3u);
+
+        for (int y = 0; y < h; ++y)
+            for (int x = 0; x < w; ++x)
+            {
+                auto* p = rgb.data() + ((size_t) y * w + (size_t) x) * 3u;
+                p[0] = (uint8_t) (x * 4); p[1] = (uint8_t) (y * 4); p[2] = 77;
+            }
+
+        std::vector<float> out ((size_t) w * h * 3u);
+        sl::warpToTensor (rgb.data(), w, h, w * 3, 32.0f, 32.0f, 64.0f, 0.0f, 64, out.data());
+
+        float worst = 0.0f;
+
+        for (size_t i = 0; i < out.size(); ++i)
+            worst = std::max (worst, std::abs (out[i] - (float) rgb[i] / 255.0f));
+
+        check (worst < 0.01f, "warp: an unrotated full-frame crop copies the frame");
+
+        // A quarter turn: the crop's "up" is the frame's right.
+        sl::warpToTensor (rgb.data(), w, h, w * 3, 32.0f, 32.0f, 64.0f, 3.14159265f * 0.5f, 64, out.data());
+        const float topRed = out[((size_t) 2 * 64 + 32) * 3u] * 255.0f;   // crop row 2, centre column
+        check (topRed > 220.0f, "warp: a 90 degree crop puts the frame's right edge at the top");
+
+        // Pointing: world landmarks for a hand with the index finger out and
+        // the rest folded, and the same hand open.
+        sl::HandPose open, point;
+        const auto setPt = [] (sl::HandPose& p, int i, float x, float y)
+        {
+            p.wx[i] = x; p.wy[i] = y; p.wz[i] = 0.0f;
+        };
+
+        // x across the palm, y up the fingers (metres). Knuckles at y = 0.08.
+        const float fingerX[4] { -0.025f, 0.0f, 0.02f, 0.038f };
+
+        for (auto* p : { &open, &point })
+        {
+            setPt (*p, 0, 0.0f, 0.0f);                       // wrist
+            setPt (*p, 1, -0.03f, 0.02f);  setPt (*p, 2, -0.045f, 0.04f);
+            setPt (*p, 3, -0.055f, 0.06f); setPt (*p, 4, -0.06f, 0.075f);   // thumb out to the side
+
+            for (int f = 0; f < 4; ++f)
+            {
+                const int base = 5 + f * 4;
+                const bool out_ = p == &open || f == 0;
+
+                setPt (*p, base, fingerX[f], 0.08f);
+                setPt (*p, base + 1, fingerX[f], 0.11f);
+
+                if (out_)
+                {
+                    setPt (*p, base + 2, fingerX[f], 0.13f);
+                    setPt (*p, base + 3, fingerX[f], 0.15f);
+                }
+                else
+                {
+                    // Folded back down towards the palm.
+                    setPt (*p, base + 2, fingerX[f], 0.09f);
+                    setPt (*p, base + 3, fingerX[f], 0.07f);
+                }
+            }
+        }
+
+        check (sl::HandLandmarker::looksLikePointing (point), "point: index out, others folded reads as pointing");
+        check (! sl::HandLandmarker::looksLikePointing (open), "point: an open hand is not pointing");
+        check (sl::HandLandmarker::thumbToIndexSide (point) > sl::HandLandmarker::clickOffMetres,
+               "point: a thumb held out is not a click");
+
+        sl::HandPose pressed = point;
+        pressed.wx[4] = -0.012f; pressed.wy[4] = 0.095f;   // thumb tip against the index finger
+        check (sl::HandLandmarker::thumbToIndexSide (pressed) < sl::HandLandmarker::clickOnMetres,
+               "point: the thumb pressed to the index finger is a click");
+    }
+
+   #if SL_HAVE_ORT && defined (SL_TEST_MODEL_DIR)
+    // ---- the real models -----------------------------------------------------
+    {
+        const auto readFile = [] (const std::string& path)
+        {
+            std::ifstream in (path, std::ios::binary);
+            return std::vector<char> ((std::istreambuf_iterator<char> (in)), std::istreambuf_iterator<char>());
+        };
+
+        std::wstring dll = exeDir + L"onnxruntime.dll";
+        std::string error;
+        const bool loaded = sl::ort::loadRuntime (dll, error);
+        check (loaded, ("model: ONNX Runtime loads " + error).c_str());
+
+        const auto palmBytes = readFile (std::string (SL_TEST_MODEL_DIR) + "/palm_detection.onnx");
+        const auto handBytes = readFile (std::string (SL_TEST_MODEL_DIR) + "/hand_landmark.onnx");
+
+        auto palm = sl::ort::createModel (palmBytes.data(), palmBytes.size(), { 1, 192, 192, 3 }, error);
+        auto hand = palm == nullptr ? nullptr
+                  : sl::ort::createModel (handBytes.data(), handBytes.size(), { 1, 224, 224, 3 }, error);
+        check (palm != nullptr && hand != nullptr, ("model: both models load " + error).c_str());
+
+        if (palm != nullptr && hand != nullptr)
+        {
+            sl::HandTracker tracker;
+            tracker.setLandmarker (std::make_unique<sl::HandLandmarker> (std::move (palm), std::move (hand)));
+
+            // The old tracker saw hands in these; the model must not.
+            const int w = 640, h = 480;
+            const auto wall = makeFrame (w, h, 0.5f, 0.5f, 0, false);
+            const auto blob = makeFrame (w, h, 0.12f, 0.5f, 60);
+
+            std::vector<uint8_t> noise ((size_t) w * h * 3u);
+            uint32_t seed = 1234567u;
+
+            for (auto& v : noise)
+            {
+                seed = seed * 1664525u + 1013904223u;
+                v = (uint8_t) (seed >> 24);
+            }
+
+            int ghosts = 0;
+
+            for (int i = 0; i < 10; ++i)
+            {
+                const auto& f = i % 3 == 0 ? wall : (i % 3 == 1 ? blob : noise);
+                tracker.analyse (f.data(), w, h, w * 3, 0.5f, i * 33.0);
+                ghosts += (tracker.side (0).detected ? 1 : 0) + (tracker.side (1).detected ? 1 : 0);
+            }
+
+            check (ghosts == 0, "model: walls, skin-coloured blobs and noise report no hand");
+        }
+    }
+   #endif
 
     // ---- the built-in instrument -------------------------------------------
     {

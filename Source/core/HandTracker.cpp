@@ -66,8 +66,17 @@ void HandTracker::prepare (int frameWidth, int frameHeight)
     reset();
 }
 
+void HandTracker::setLandmarker (std::unique_ptr<HandLandmarker> l)
+{
+    landmarker = std::move (l);
+    reset();
+}
+
 void HandTracker::reset()
 {
+    if (landmarker != nullptr)
+        landmarker->reset();
+
     for (auto& h : hands)
         h = {};
 
@@ -83,7 +92,7 @@ void HandTracker::resetTrack (Track& t)
 }
 
 void HandTracker::analyse (const uint8_t* rgb, int frameWidth, int frameHeight, int rowStrideBytes,
-                           float sensitivity01)
+                           float sensitivity01, double nowMs)
 {
     if (rgb == nullptr || frameWidth <= 0 || frameHeight <= 0)
     {
@@ -91,6 +100,107 @@ void HandTracker::analyse (const uint8_t* rgb, int frameWidth, int frameHeight, 
         return;
     }
 
+    clockMs = nowMs >= 0.0 ? nowMs : clockMs + 1000.0 / 30.0;
+
+    if (landmarker != nullptr)
+        analyseModel (rgb, frameWidth, frameHeight, rowStrideBytes, clockMs);
+    else
+        analyseHeuristic (rgb, frameWidth, frameHeight, rowStrideBytes, sensitivity01);
+}
+
+void HandTracker::analyseModel (const uint8_t* rgb, int frameWidth, int frameHeight, int rowStrideBytes,
+                                double nowMs)
+{
+    // The debug mask belongs to the heuristic; the stage draws the skeleton.
+    gridW = gridH = 0;
+    mask.clear();
+
+    landmarker->process (rgb, frameWidth, frameHeight, rowStrideBytes, nowMs);
+
+    for (auto& h : hands)
+        h = {};
+
+    // The hands that can aim right now, with the point each one aims at.
+    struct Aimed { const HandPose* pose; float x, y; bool trigger; };
+    Aimed aimed[2];
+    int count = 0;
+
+    for (const auto& p : landmarker->hands())
+    {
+        if (count == 2)
+            break;
+
+        if (aim == AimMode::Fingertip)
+        {
+            if (p.pointing)
+                aimed[count++] = { &p, p.tipX, p.tipY, p.clicking };
+        }
+        else
+        {
+            aimed[count++] = { &p, p.cursorX, p.cursorY, p.pinching };
+        }
+    }
+
+    // Two hands: the one further left plays the left rail. One hand: whichever
+    // half of the picture it is in.
+    int order[2] { -1, -1 };
+
+    if (count == 2)
+    {
+        const bool firstIsLeft = aimed[0].x <= aimed[1].x;
+        order[0] = firstIsLeft ? 0 : 1;
+        order[1] = firstIsLeft ? 1 : 0;
+    }
+    else if (count == 1)
+    {
+        order[aimed[0].x < (float) frameWidth * 0.5f ? 0 : 1] = 0;
+    }
+
+    const float sx = 1.0f / (float) frameWidth, sy = 1.0f / (float) frameHeight;
+
+    for (int s = 0; s < 2; ++s)
+    {
+        if (order[s] < 0)
+            continue;
+
+        const auto& a = aimed[order[s]];
+        HandPose p = *a.pose;
+
+        for (int i = 0; i < HandPose::numPoints; ++i)
+        {
+            p.x[i] *= sx;
+            p.y[i] *= sy;
+        }
+
+        p.cursorX *= sx;
+        p.cursorY *= sy;
+        p.tipX *= sx;
+        p.tipY *= sy;
+        poses[s] = p;
+
+        float x0 = 1.0f, x1 = 0.0f, y0 = 1.0f, y1 = 0.0f;
+
+        for (int i = 0; i < HandPose::numPoints; ++i)
+        {
+            x0 = std::min (x0, p.x[i]);  x1 = std::max (x1, p.x[i]);
+            y0 = std::min (y0, p.y[i]);  y1 = std::max (y1, p.y[i]);
+        }
+
+        auto& out = hands[s];
+        out.detected = true;
+        out.x = std::clamp (a.x * sx, 0.0f, 1.0f);
+        out.y = std::clamp (a.y * sy, 0.0f, 1.0f);
+        out.size = std::max (0.0f, (x1 - x0) * (y1 - y0));
+        out.confidence = p.presence;
+        out.hasPinch = true;
+        out.pinching = a.trigger;
+        out.pointing = p.pointing;
+    }
+}
+
+void HandTracker::analyseHeuristic (const uint8_t* rgb, int frameWidth, int frameHeight, int rowStrideBytes,
+                                    float sensitivity01)
+{
     if (frameWidth != frameW || frameHeight != frameH || gridW <= 0)
         prepare (frameWidth, frameHeight);
 

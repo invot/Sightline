@@ -22,8 +22,104 @@ set(SL_CORE_SOURCES
     Source/core/Scales.cpp
     Source/core/ZoneMap.cpp
     Source/core/HandTracker.cpp
+    Source/core/HandLandmarker.cpp
+    Source/core/OrtModel.cpp
     Source/core/GestureEngine.cpp
     Source/core/InternalSynth.cpp)
+
+# ---------------------------------------------------------------------------
+# Hand landmark model: ONNX Runtime (MIT, Microsoft's NuGet package) and the
+# MediaPipe palm detector + hand landmark models (Apache-2.0, OpenCV model
+# zoo). Downloaded once into SL_DEPS_DIR, pinned by SHA-256. Without them the
+# build still works and the app uses the basic skin/motion tracker.
+# ---------------------------------------------------------------------------
+set(SL_DEPS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/.tools" CACHE PATH "Where downloaded dependencies are kept")
+option(SL_HAND_MODEL "Track hands with the MediaPipe landmark model (ONNX Runtime)" ON)
+
+set(SL_ORT_VERSION 1.31.1)
+set(SL_ORT_URL "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/${SL_ORT_VERSION}/microsoft.ml.onnxruntime.${SL_ORT_VERSION}.nupkg")
+set(SL_ORT_SHA256 6871ccbc97f3d5bdb4095a1dcec33aa78d56f6ed8de5980ef5fa1d9f2e7c679a)
+set(SL_ORT_DIR "${SL_DEPS_DIR}/onnxruntime-${SL_ORT_VERSION}")
+set(SL_ORT_DLL "${SL_ORT_DIR}/runtimes/win-x64/native/onnxruntime.dll")
+
+set(SL_MODEL_DIR "${SL_DEPS_DIR}/mediapipe-hands-2023feb")
+set(SL_HF "https://huggingface.co/opencv")
+set(SL_MODEL_FILES
+    "palm_detection.onnx|${SL_HF}/palm_detection_mediapipe/resolve/233e619dcea1759bf6de707b9b904fe30881ea55/palm_detection_mediapipe_2023feb.onnx|78ff51c38496b7fc8b8ebdb6cc8c1abb02fa6c38427c6848254cdaba57fcce7c"
+    "hand_landmark.onnx|${SL_HF}/handpose_estimation_mediapipe/resolve/4b2a0b446e5cf2f11fb6b2c7251091c035d2c1f7/handpose_estimation_mediapipe_2023feb.onnx|db0898ae717b76b075d9bf563af315b29562e11f8df5027a1ef07b02bef6d81c"
+    "LICENSE|${SL_HF}/handpose_estimation_mediapipe/resolve/4b2a0b446e5cf2f11fb6b2c7251091c035d2c1f7/LICENSE|58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd")
+
+set(SL_HAVE_ORT OFF)
+
+if (SL_HAND_MODEL AND WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8)
+    if (NOT EXISTS "${SL_ORT_DLL}")
+        set(nupkg "${SL_DEPS_DIR}/dl/onnxruntime-${SL_ORT_VERSION}.nupkg")
+        message(STATUS "Downloading ONNX Runtime ${SL_ORT_VERSION} (about 160 MB, once)")
+        file(DOWNLOAD "${SL_ORT_URL}" "${nupkg}" EXPECTED_HASH SHA256=${SL_ORT_SHA256} STATUS dlStatus)
+        list(GET dlStatus 0 dlCode)
+
+        if (dlCode EQUAL 0)
+            file(ARCHIVE_EXTRACT INPUT "${nupkg}" DESTINATION "${SL_ORT_DIR}"
+                 PATTERNS "build/native/include/*" "runtimes/win-x64/native/onnxruntime.dll"
+                          "LICENSE" "ThirdPartyNotices.txt")
+            file(REMOVE "${nupkg}")
+        else()
+            message(WARNING "ONNX Runtime download failed (${dlStatus})")
+        endif()
+    endif()
+
+    set(modelsOk ON)
+
+    foreach (entry IN LISTS SL_MODEL_FILES)
+        string(REPLACE "|" ";" parts "${entry}")
+        list(GET parts 0 name)
+        list(GET parts 1 url)
+        list(GET parts 2 hash)
+
+        if (NOT EXISTS "${SL_MODEL_DIR}/${name}")
+            message(STATUS "Downloading ${name}")
+            file(DOWNLOAD "${url}" "${SL_MODEL_DIR}/${name}.part" EXPECTED_HASH SHA256=${hash} STATUS dlStatus)
+            list(GET dlStatus 0 dlCode)
+
+            if (dlCode EQUAL 0)
+                file(RENAME "${SL_MODEL_DIR}/${name}.part" "${SL_MODEL_DIR}/${name}")
+            else()
+                file(REMOVE "${SL_MODEL_DIR}/${name}.part")
+                message(WARNING "Download of ${name} failed (${dlStatus})")
+                set(modelsOk OFF)
+            endif()
+        endif()
+    endforeach()
+
+    if (modelsOk AND EXISTS "${SL_ORT_DLL}" AND EXISTS "${SL_ORT_DIR}/build/native/include/onnxruntime_c_api.h")
+        set(SL_HAVE_ORT ON)
+    endif()
+endif()
+
+if (SL_HAVE_ORT)
+    message(STATUS "Hand landmark model: on (ONNX Runtime ${SL_ORT_VERSION})")
+else()
+    message(WARNING "Hand landmark model: off, the basic tracker will be used")
+endif()
+
+# Puts onnxruntime.dll and the licences of what it ships next to a target's binary.
+function(sl_copy_runtime target)
+    if (SL_HAVE_ORT AND TARGET ${target})
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${SL_ORT_DLL}" "$<TARGET_FILE_DIR:${target}>/onnxruntime.dll"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${SL_ORT_DIR}/LICENSE" "$<TARGET_FILE_DIR:${target}>/onnxruntime-LICENSE.txt"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${SL_ORT_DIR}/ThirdPartyNotices.txt" "$<TARGET_FILE_DIR:${target}>/onnxruntime-ThirdPartyNotices.txt"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${SL_MODEL_DIR}/LICENSE" "$<TARGET_FILE_DIR:${target}>/mediapipe-models-LICENSE.txt"
+            VERBATIM)
+    endif()
+endfunction()
+
+function(sl_use_ort target)
+    if (SL_HAVE_ORT)
+        target_compile_definitions(${target} PRIVATE SL_HAVE_ORT=1)
+        target_include_directories(${target} SYSTEM PRIVATE "${SL_ORT_DIR}/build/native/include")
+    endif()
+endfunction()
 
 # ---------------------------------------------------------------------------
 # JUCE-free tests for the mapping / gating / detection core.
@@ -32,6 +128,11 @@ add_executable(SightLineTests Tests/main.cpp ${SL_CORE_SOURCES})
 target_include_directories(SightLineTests PRIVATE Source)
 set_target_properties(SightLineTests PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+sl_use_ort(SightLineTests)
+sl_copy_runtime(SightLineTests)
+if (SL_HAVE_ORT)
+    target_compile_definitions(SightLineTests PRIVATE SL_TEST_MODEL_DIR="${SL_MODEL_DIR}")
+endif()
 if (NOT MSVC)
     target_compile_options(SightLineTests PRIVATE -Wall -Wextra -Wno-unused-parameter)
 endif()
@@ -69,6 +170,20 @@ if (EXISTS "${SL_JUCE_DIR}/CMakeLists.txt")
         ${SL_CORE_SOURCES})
 
     target_include_directories(SightLine PRIVATE Source)
+    sl_use_ort(SightLine)
+
+    # The two models are compiled into the binary (about 8 MB), so they can
+    # never go missing or mismatch; only onnxruntime.dll sits beside it.
+    if (SL_HAVE_ORT)
+        juce_add_binary_data(SightLineModels
+            HEADER_NAME SightLineModels.h
+            NAMESPACE SightLineModels
+            SOURCES "${SL_MODEL_DIR}/palm_detection.onnx" "${SL_MODEL_DIR}/hand_landmark.onnx")
+        target_link_libraries(SightLine PRIVATE SightLineModels)
+    endif()
+
+    sl_copy_runtime(SightLine_VST3)
+    sl_copy_runtime(SightLine_Standalone)
 
     # MinGW has no #pragma linker manifest, so embed the manifest (common
     # controls v6 + per-monitor DPI) as a resource on every Windows target.
@@ -132,6 +247,11 @@ if (EXISTS "${SL_JUCE_DIR}/CMakeLists.txt")
         Source/ui/SetupPanel.cpp
         ${SL_CORE_SOURCES})
     target_include_directories(SightLineSmoke PRIVATE Source)
+    sl_use_ort(SightLineSmoke)
+    if (SL_HAVE_ORT)
+        target_link_libraries(SightLineSmoke PRIVATE SightLineModels)
+    endif()
+    sl_copy_runtime(SightLineSmoke)
     if (WIN32)
         target_sources(SightLineSmoke PRIVATE Source/platform/win_manifest.rc)
         set_source_files_properties (Source/platform/win_manifest.rc PROPERTIES

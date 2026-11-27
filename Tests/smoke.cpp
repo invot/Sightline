@@ -300,7 +300,73 @@ int main()
         auto* proc = static_cast<sl::SightLineProcessor*> (editor->getAudioProcessor());
         auto* sight = dynamic_cast<sl::SightLineEditor*> (editor);
 
-        if (sight != nullptr)
+        const bool model = sight != nullptr && sight->usesHandModelForTesting();
+        std::fprintf (stderr, "[12a] hand tracker: %s\n", model ?"landmark model" : "basic (no ONNX Runtime)");
+
+        const auto photoFile = juce::File::getCurrentWorkingDirectory().getChildFile ("docs/media/camera-frame.jpg");
+        const auto photo = juce::ImageFileFormat::loadFrom (photoFile);
+
+        if (sight != nullptr && model)
+        {
+            // A real photo of two open hands. The landmark model can't be fooled
+            // by a drawn blob, so the checks use it instead.
+            check (photo.isValid(), "[13] the test photo loads (run from the repo root)");
+
+            if (auto* pinch = dynamic_cast<juce::AudioParameterBool*> (proc->apvts.getParameter ("pinch")))
+                *pinch = true;
+
+            proc->syncZones();
+
+            double total = 0.0;
+            const int runs = 20;
+
+            for (int i = 0; i < runs; ++i)
+            {
+                const auto t0 = juce::Time::getMillisecondCounterHiRes();
+                sight->feedFrame (photo);
+                total += juce::Time::getMillisecondCounterHiRes() - t0;
+                juce::Thread::sleep (10);
+            }
+
+            std::fprintf (stderr, "[13a] %d x %d photo: %.1f ms a frame including tracking\n",
+                          photo.getWidth(), photo.getHeight(), total / runs);
+
+            const auto live = proc->getLiveState();
+            check (live.handSeen[0] && live.handSeen[1], "[13] the model finds both hands in the photo");
+            check (live.hasPinch[0] && ! live.pinching[0] && ! live.pinching[1],
+                   "[13b] both hands read as open, not pinching");
+            check (live.activeNote[0] < 0 && live.activeNote[1] < 0,
+                   "[14] open hands under pinch-to-play hold no note");
+
+            // Mirrored display: the photo's right hand (x ~ 0.74) is drawn on
+            // the left. The cursor sits between thumb and index tip.
+            check (std::abs (live.handX[0] - (1.0f - 0.74f)) < 0.12f && std::abs (live.handX[1] - (1.0f - 0.30f)) < 0.12f,
+                   "[14b] each cursor sits on its hand");
+
+            // An empty room: no hand, no cursor, no note.
+            const auto empty = makeCameraImage (960, 540);
+
+            for (int i = 0; i < 4; ++i)
+                sight->feedFrame (empty);
+
+            const auto after = proc->getLiveState();
+            check (! after.handSeen[0] && ! after.handSeen[1], "[14c] an empty room shows no hand");
+
+            // Pointing-finger aim: open hands aren't pointing, so nothing aims.
+            if (auto* aim = dynamic_cast<juce::AudioParameterChoice*> (proc->apvts.getParameter ("aim")))
+            {
+                *aim = 1;
+
+                for (int i = 0; i < 4; ++i)
+                    sight->feedFrame (photo);
+
+                const auto pointing = proc->getLiveState();
+                check (! pointing.handSeen[0] && ! pointing.handSeen[1],
+                       "[14d] pointing-finger aim ignores open hands");
+                *aim = 0;
+            }
+        }
+        else if (sight != nullptr)
         {
             const auto frame = makeCameraImage (960, 540, 0.09f, 0.55f);
             sight->feedFrame (frame);
@@ -308,12 +374,12 @@ int main()
             juce::Thread::sleep (140);
             sight->feedFrame (frame);
             juce::MessageManager::getInstance()->runDispatchLoopUntil (120);
-        }
 
-        check (proc->getLiveState().handSeen[1], "[13] the editor tracks the hand in the frame");
-        check (proc->getLiveState().activeNote[1] >= 0, "[14] the hand is holding a note");
-        check (sight != nullptr && sight->getStageForTesting()->hasTrackingMask(),
-               "[14a] the tracking test receives the detector's mask");
+            check (proc->getLiveState().handSeen[1], "[13] the editor tracks the hand in the frame");
+            check (proc->getLiveState().activeNote[1] >= 0, "[14] the hand is holding a note");
+            check (sight->getStageForTesting()->hasTrackingMask(),
+                   "[14a] the tracking test receives the detector's mask");
+        }
 
         const auto snapDir = juce::SystemStats::getEnvironmentVariable ("SIGHTLINE_SNAPSHOT_DIR", {});
 
@@ -369,7 +435,7 @@ int main()
                     if (auto* stage = sight->getStageForTesting())
                     {
                         stage->setTrackingDebug (true);
-                        sight->feedFrame (makeCameraImage (960, 540, 0.09f, 0.55f));
+                        sight->feedFrame (model && photo.isValid() ? photo : makeCameraImage (960, 540, 0.09f, 0.55f));
                         juce::MessageManager::getInstance()->runDispatchLoopUntil (60);
                         save ("play-tracking");
                         stage->setTrackingDebug (false);

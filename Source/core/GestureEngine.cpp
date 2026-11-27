@@ -91,6 +91,9 @@ float GestureEngine::dwellProgress (int side, double nowMs) const noexcept
 {
     const auto& s = sides[side & 1];
 
+    if (s.hovering)
+        return 0.0f;
+
     if (s.candidate < 0 || s.candidate == s.active)
         return s.active >= 0 ? 1.0f : 0.0f;
 
@@ -111,6 +114,23 @@ void GestureEngine::release (int side, std::vector<NoteEvent>& out)
     s.activeNote = -1;
 }
 
+void GestureEngine::start (int side, int zone, std::vector<NoteEvent>& out)
+{
+    release (side, out);
+
+    auto& state = sides[side];
+    const auto& z = zones[(size_t) zone];
+    const int ch = channelFor (z);
+
+    // Releasing the other side may already have released this exact
+    // note; don't send a second note-off for it later.
+    out.push_back (NoteEvent::on (z.note, velocity, ch));
+
+    state.active = zone;
+    state.activeNote = z.note;
+    state.activeChannel = ch;
+}
+
 void GestureEngine::update (const HandSample& left, const HandSample& right, double nowMs,
                             std::vector<NoteEvent>& out)
 {
@@ -122,10 +142,29 @@ void GestureEngine::update (const HandSample& left, const HandSample& right, dou
         auto& state = sides[s];
 
         const int hit = hand.detected ? hitTest (s, hand.x, hand.y) : -1;
+        const bool gated = pinchToPlay && hand.detected && hand.hasPinch;
+        state.hovering = gated && ! hand.pinching;
+
+        if (gated && ! hand.pinching)
+        {
+            // An open hand only points: show the target, and stop at once
+            // whatever the last pinch was playing.
+            state.pinchHeld = false;
+            state.candidate = hit;
+            state.dwellStartMs = nowMs;
+
+            if (state.activeNote >= 0)
+                release (s, out);
+
+            continue;
+        }
 
         if (hit < 0)
         {
             state.candidate = -1;
+
+            if (! hand.detected)
+                state.pinchHeld = false;
 
             if (state.activeNote >= 0 && nowMs - state.lastSeenMs >= releaseMs)
                 release (s, out);
@@ -134,6 +173,19 @@ void GestureEngine::update (const HandSample& left, const HandSample& right, dou
         }
 
         state.lastSeenMs = nowMs;
+
+        if (gated && ! state.pinchHeld)
+        {
+            // The pinch closing is the trigger: no dwell.
+            state.pinchHeld = true;
+            state.candidate = hit;
+            state.dwellStartMs = nowMs;
+
+            if (hit != state.active)
+                start (s, hit, out);
+
+            continue;
+        }
 
         if (hit != state.candidate)
         {
@@ -145,20 +197,7 @@ void GestureEngine::update (const HandSample& left, const HandSample& right, dou
             continue;
 
         if (nowMs - state.dwellStartMs >= dwellMs)
-        {
-            release (s, out);
-
-            const auto& z = zones[(size_t) hit];
-            const int ch = channelFor (z);
-
-            // Releasing the other side may already have released this exact
-            // note; don't send a second note-off for it later.
-            out.push_back (NoteEvent::on (z.note, velocity, ch));
-
-            state.active = hit;
-            state.activeNote = z.note;
-            state.activeChannel = ch;
-        }
+            start (s, hit, out);
     }
 }
 

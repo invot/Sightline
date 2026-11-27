@@ -1,5 +1,10 @@
 #include "PluginEditor.h"
 #include "StandaloneBridge.h"
+#include "core/OrtModel.h"
+
+#if SL_HAVE_ORT
+ #include "SightLineModels.h"
+#endif
 
 namespace sl
 {
@@ -82,6 +87,7 @@ SightLineEditor::SightLineEditor (SightLineProcessor& p)
     setSize (1180, 780);
 
     cameraDisabled = juce::SystemStats::getEnvironmentVariable ("SIGHTLINE_NO_CAMERA", {}).isNotEmpty();
+    loadHandModel();
 
     // TEMP DIAG
     if (const auto forced = juce::SystemStats::getEnvironmentVariable ("SIGHTLINE_CAMERA_INDEX", {});
@@ -118,6 +124,41 @@ SightLineEditor::~SightLineEditor()
 }
 
 //==============================================================================
+void SightLineEditor::loadHandModel()
+{
+    std::string error;
+
+   #if SL_HAVE_ORT
+    // onnxruntime.dll ships next to the app, and inside the VST3 bundle next to
+    // the plugin binary; currentExecutableFile is the plugin's own module.
+    const auto dll = juce::File::getSpecialLocation (juce::File::currentExecutableFile)
+                         .getSiblingFile ("onnxruntime.dll");
+
+    if (ort::loadRuntime (dll.getFullPathName().toWideCharPointer(), error))
+    {
+        auto palm = ort::createModel (SightLineModels::palm_detection_onnx,
+                                      (size_t) SightLineModels::palm_detection_onnxSize,
+                                      { 1, 192, 192, 3 }, error);
+        auto hand = palm == nullptr ? nullptr
+                  : ort::createModel (SightLineModels::hand_landmark_onnx,
+                                      (size_t) SightLineModels::hand_landmark_onnxSize,
+                                      { 1, 224, 224, 3 }, error);
+
+        if (palm != nullptr && hand != nullptr)
+        {
+            tracker.setLandmarker (std::make_unique<HandLandmarker> (std::move (palm), std::move (hand)));
+            stage.setTrackerInfo ("Hand model: pinch to play", true);
+            return;
+        }
+    }
+   #else
+    error = "built without ONNX Runtime";
+   #endif
+
+    DBG ("sightline: hand model unavailable: " << error);
+    stage.setTrackerInfo ("Basic tracker (" + juce::String (error) + ")", false);
+}
+
 void SightLineEditor::refreshCameraList()
 {
     cameraNames = juce::CameraDevice::getAvailableDevices();
@@ -231,13 +272,43 @@ void SightLineEditor::feedFrame (const juce::Image& image)
 
     const auto diagRepack = juce::Time::getMillisecondCounterHiRes();
 
-    tracker.analyse (rgbScratch.data(), w, h, w * 3, proc.sensitivity());
+    const double now = juce::Time::getMillisecondCounterHiRes();
+    tracker.setAimMode (proc.aimMode());
+    tracker.analyse (rgbScratch.data(), w, h, w * 3, proc.sensitivity(), now);
     stage.setTrackingMask (tracker.lastMask(), tracker.maskWidth(), tracker.maskHeight());
 
     const auto diagTrack = juce::Time::getMillisecondCounterHiRes();
 
     auto left  = tracker.side (0);
     auto right = tracker.side (1);
+
+    // The skeletons for the tracking test, in stage coordinates.
+    ui::StagePanel::Skeleton skeletons[2];
+
+    for (int s = 0; s < 2; ++s)
+    {
+        const auto* pose = tracker.pose (s);
+
+        if (pose == nullptr)
+            continue;
+
+        const int shown = proc.isMirrored() ? 1 - s : s;
+        auto& sk = skeletons[shown];
+        sk.valid = true;
+        sk.pinching = tracker.aimMode() == AimMode::Fingertip ? pose->clicking : pose->pinching;
+        sk.pointing = pose->pointing;
+
+        for (int i = 0; i < HandPose::numPoints; ++i)
+        {
+            HandSample pt;
+            pt.x = proc.isMirrored() ? 1.0f - pose->x[i] : pose->x[i];
+            pt.y = pose->y[i];
+            pt = stage.frameToStage (pt, w, h);
+            sk.points[i] = { pt.x, pt.y };
+        }
+    }
+
+    stage.setSkeletons (skeletons);
 
     if (proc.isMirrored())
     {
@@ -253,7 +324,7 @@ void SightLineEditor::feedFrame (const juce::Image& image)
     left  = stage.frameToStage (left, w, h);
     right = stage.frameToStage (right, w, h);
 
-    proc.updateHands (left, right, juce::Time::getMillisecondCounterHiRes());
+    proc.updateHands (left, right, now);
 
     stage.setFrame (proc.isMirrored() ? mirrorHorizontally (source, mirroredFrame) : source);
     ++framesThisSecond;
@@ -348,10 +419,24 @@ void SightLineEditor::timerCallback()
     if (const int pad = proc.learningPad(); pad >= 0)
         stage.setOverlayText (juce::String ("MIDI learn: ") + drumPadName (pad)
                               + " - play a note on your controller, or right-click the pad to cancel.");
-    else if (proc.currentOverlay() == Overlay::Drums)
-        stage.setOverlayText ("Drums: place a hand on a pad - both rails carry the same kit.");
     else
-        stage.setOverlayText ("Move a hand into a rail and hold it on a note.");
+    {
+        // How to play depends on the tracker and the Playing settings.
+        juce::String how;
+
+        if (! tracker.usesModel() || ! proc.pinchToPlay())
+            how = proc.aimMode() == AimMode::Fingertip && tracker.usesModel()
+                    ? "point at a target and hold still to play it"
+                    : "hold a hand on a target to play it";
+        else if (proc.aimMode() == AimMode::Fingertip)
+            how = "point at a target, then press your thumb to your index finger to play";
+        else
+            how = "aim between thumb and index finger, then pinch to play";
+
+        stage.setOverlayText (proc.currentOverlay() == Overlay::Drums
+                                ? "Drums: " + how + " - both rails carry the same kit."
+                                : how.substring (0, 1).toUpperCase() + how.substring (1) + ".");
+    }
 
     repaint (headerArea);
     repaint (footerArea);

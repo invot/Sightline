@@ -1,0 +1,6 @@
+build/
+.tools/
+build-logs/
+*.user
+.DS_Store
+.freebuff/

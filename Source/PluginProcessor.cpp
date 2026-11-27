@@ -1,0 +1,412 @@
+#include "PluginProcessor.h"
+#include "PluginEditor.h"
+
+namespace sl
+{
+
+juce::AudioProcessorEditor* SightLineProcessor::createEditor()
+{
+    return new SightLineEditor (*this);
+}
+
+namespace
+{
+    juce::StringArray choiceStrings (const char* const* items, int count)
+    {
+        juce::StringArray a;
+
+        for (int i = 0; i < count; ++i)
+            a.add (items[i]);
+
+        return a;
+    }
+
+    const char* const rootNames[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+}
+
+SightLineProcessor::SightLineProcessor()
+    : AudioProcessor (BusesProperties()
+                          .withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
+                          .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
+      apvts (*this, nullptr, "SightLine", createLayout())
+{
+    p.overlay     = apvts.getRawParameterValue ("overlay");
+    p.keyRoot     = apvts.getRawParameterValue ("keyRoot");
+    p.scale       = apvts.getRawParameterValue ("scale");
+    p.octave      = apvts.getRawParameterValue ("octave");
+    p.velocity    = apvts.getRawParameterValue ("velocity");
+    p.dwell       = apvts.getRawParameterValue ("dwell");
+    p.release     = apvts.getRawParameterValue ("release");
+    p.sensitivity = apvts.getRawParameterValue ("sensitivity");
+    p.melodyChan  = apvts.getRawParameterValue ("melodyChan");
+    p.drumChan    = apvts.getRawParameterValue ("drumChan");
+    p.opacity     = apvts.getRawParameterValue ("opacity");
+    p.mirror      = apvts.getRawParameterValue ("mirror");
+    p.builtIn     = apvts.getRawParameterValue ("builtIn");
+    p.camera      = apvts.getRawParameterValue ("cameraIndex");
+    p.gain        = apvts.getRawParameterValue ("gain");
+
+    syncZones();
+}
+
+SightLineProcessor::~SightLineProcessor() = default;
+
+juce::AudioProcessorValueTreeState::ParameterLayout SightLineProcessor::createLayout()
+{
+    using namespace juce;
+
+    AudioProcessorValueTreeState::ParameterLayout layout;
+
+    layout.add (std::make_unique<AudioParameterChoice> (
+        ParameterID { "overlay", 1 }, "Overlay",
+        StringArray { "Keys", "Scale", "Drums" }, 0));
+
+    layout.add (std::make_unique<AudioParameterChoice> (
+        ParameterID { "keyRoot", 1 }, "Key",
+        choiceStrings (rootNames, 12), 0));
+
+    StringArray scales;
+
+    for (int i = 0; i < (int) ScaleType::NumScales; ++i)
+        scales.add (scaleName ((ScaleType) i));
+
+    layout.add (std::make_unique<AudioParameterChoice> (
+        ParameterID { "scale", 1 }, "Scale", scales, 1));
+
+    layout.add (std::make_unique<AudioParameterInt> (
+        ParameterID { "octave", 1 }, "Octave", -2, 3, 0));
+
+    layout.add (std::make_unique<AudioParameterInt> (
+        ParameterID { "velocity", 1 }, "Velocity", 1, 127, 100));
+
+    layout.add (std::make_unique<AudioParameterFloat> (
+        ParameterID { "dwell", 1 }, "Dwell",
+        NormalisableRange<float> (0.0f, 400.0f, 1.0f), 90.0f));
+
+    layout.add (std::make_unique<AudioParameterFloat> (
+        ParameterID { "release", 1 }, "Release",
+        NormalisableRange<float> (20.0f, 600.0f, 1.0f), 150.0f));
+
+    layout.add (std::make_unique<AudioParameterFloat> (
+        ParameterID { "sensitivity", 1 }, "Sensitivity",
+        NormalisableRange<float> (0.0f, 100.0f, 1.0f), 50.0f));
+
+    StringArray channels;
+
+    for (int i = 1; i <= 16; ++i)
+        channels.add (String (i));
+
+    layout.add (std::make_unique<AudioParameterChoice> (
+        ParameterID { "melodyChan", 1 }, "Melody channel", channels, 0));
+
+    layout.add (std::make_unique<AudioParameterChoice> (
+        ParameterID { "drumChan", 1 }, "Drum channel", channels, 9));
+
+    layout.add (std::make_unique<AudioParameterFloat> (
+        ParameterID { "opacity", 1 }, "Overlay opacity",
+        NormalisableRange<float> (10.0f, 75.0f, 1.0f), 34.0f));
+
+    layout.add (std::make_unique<AudioParameterBool> (
+        ParameterID { "mirror", 1 }, "Mirror camera", true));
+
+    layout.add (std::make_unique<AudioParameterBool> (
+        ParameterID { "builtIn", 1 }, "Built-in sound", true));
+
+    layout.add (std::make_unique<AudioParameterInt> (
+        ParameterID { "cameraIndex", 1 }, "Camera", 0, 7, 0));
+
+    layout.add (std::make_unique<AudioParameterFloat> (
+        ParameterID { "gain", 1 }, "Built-in volume",
+        NormalisableRange<float> (0.0f, 100.0f, 1.0f), 65.0f));
+
+    return layout;
+}
+
+//==============================================================================
+void SightLineProcessor::prepareToPlay (double sampleRate, int)
+{
+    preparedRate = sampleRate;
+    synth.prepare (sampleRate);
+    synthPrepared = true;
+    queue.readPos.store (queue.writePos.load());
+}
+
+void SightLineProcessor::releaseResources()
+{
+    synth.allNotesOff();
+    synthPrepared = false;
+}
+
+void SightLineProcessor::reset()
+{
+    panic();
+    synth.allNotesOff();
+}
+
+bool SightLineProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
+{
+    const auto& out = layouts.getMainOutputChannelSet();
+
+    if (out != juce::AudioChannelSet::mono() && out != juce::AudioChannelSet::stereo())
+        return false;
+
+    const auto& in = layouts.getMainInputChannelSet();
+    return in == juce::AudioChannelSet::mono() || in == juce::AudioChannelSet::stereo()
+        || in == juce::AudioChannelSet::disabled();
+}
+
+//==============================================================================
+Overlay SightLineProcessor::currentOverlay() const
+{
+    return (Overlay) juce::jlimit (0, 2, (int) p.overlay->load());
+}
+
+int SightLineProcessor::currentRoot() const
+{
+    return juce::jlimit (0, 11, (int) p.keyRoot->load());
+}
+
+ScaleType SightLineProcessor::currentScale() const
+{
+    return (ScaleType) juce::jlimit (0, (int) ScaleType::NumScales - 1, (int) p.scale->load());
+}
+
+int SightLineProcessor::currentOctave() const
+{
+    return juce::jlimit (-2, 3, (int) p.octave->load());
+}
+
+int SightLineProcessor::melodyChannel() const
+{
+    return 1 + juce::jlimit (0, 15, (int) p.melodyChan->load());
+}
+
+int SightLineProcessor::drumChannel() const
+{
+    return 1 + juce::jlimit (0, 15, (int) p.drumChan->load());
+}
+
+double SightLineProcessor::dwellMs() const     { return (double) p.dwell->load(); }
+double SightLineProcessor::releaseMs() const   { return (double) p.release->load(); }
+float  SightLineProcessor::sensitivity() const { return p.sensitivity->load() / 100.0f; }
+float  SightLineProcessor::overlayOpacity() const { return p.opacity->load() / 100.0f; }
+bool   SightLineProcessor::isMirrored() const  { return p.mirror->load() > 0.5f; }
+bool   SightLineProcessor::builtInSoundOn() const { return p.builtIn->load() > 0.5f; }
+int    SightLineProcessor::cameraIndex() const { return (int) p.camera->load(); }
+
+//==============================================================================
+void SightLineProcessor::syncZones()
+{
+    const auto overlay = currentOverlay();
+    const int root = currentRoot();
+    const auto scale = currentScale();
+    const int octave = currentOctave();
+    const int vel = juce::jlimit (1, 127, (int) p.velocity->load());
+    const int mel = melodyChannel();
+    const int drum = drumChannel();
+    const double dwell = dwellMs();
+    const double release = releaseMs();
+    const bool drums = overlay == Overlay::Drums;
+
+    const bool geometryChanged = (int) overlay != lastOverlay || root != lastRoot
+                              || (int) scale != lastScale || octave != lastOctave;
+
+    if (geometryChanged || lastMelodyChan != mel || lastDrumChan != drum || lastDrums != drums)
+    {
+        // Anything sounding belongs to the old layout.
+        std::vector<NoteEvent> released;
+        gestures.reset (released);
+        push (released);
+
+        if (geometryChanged)
+            gestures.setZones (buildZones (overlay, root, scale, octave).zones);
+    }
+
+    gestures.setParams (vel, mel, drum, dwell, release, drums);
+
+    lastOverlay = (int) overlay;
+    lastRoot = root;
+    lastScale = (int) scale;
+    lastOctave = octave;
+    lastMelodyChan = mel;
+    lastDrumChan = drum;
+    lastVelocity = vel;
+    lastDwell = dwell;
+    lastRelease = release;
+    lastDrums = drums;
+}
+
+void SightLineProcessor::push (const std::vector<NoteEvent>& events)
+{
+    for (const auto& e : events)
+        queue.push (e);
+}
+
+void SightLineProcessor::updateHands (const HandSample& left, const HandSample& right, double nowMs)
+{
+    std::vector<NoteEvent> events;
+    events.reserve (8);
+
+    gestures.update (left, right, nowMs, events);
+    push (events);
+
+    for (int s = 0; s < 2; ++s)
+    {
+        const auto& h = s == 0 ? left : right;
+
+        live.handSeen[s] = h.detected;
+        live.handX[s] = h.x;
+        live.handY[s] = h.y;
+        live.dwell[s] = gestures.dwellProgress (s, nowMs);
+
+        const int active = gestures.activeZone (s);
+        live.activeNote[s] = active >= 0 ? gestures.getZones()[(size_t) active].note : -1;
+        live.hovered[s] = gestures.hoveredZone (s);
+    }
+}
+
+void SightLineProcessor::stopTracking()
+{
+    panic();
+
+    for (int s = 0; s < 2; ++s)
+    {
+        live.handSeen[s] = false;
+        live.activeNote[s] = -1;
+        live.hovered[s] = -1;
+        live.dwell[s] = 0.0f;
+    }
+}
+
+void SightLineProcessor::panic()
+{
+    std::vector<NoteEvent> events;
+    gestures.reset (events);
+    push (events);
+    queue.push (NoteEvent::panic());
+
+    for (int s = 0; s < 2; ++s)
+    {
+        live.activeNote[s] = -1;
+        live.hovered[s] = -1;
+    }
+}
+
+LiveState SightLineProcessor::getLiveState() const
+{
+    LiveState copy = live;
+    copy.fps = live.fps;
+    return copy;
+}
+
+//==============================================================================
+void SightLineProcessor::sendAllNotesOff (juce::MidiBuffer& midi, int offset, int channel)
+{
+    // Only the channels SightLine plays on: the rest of the track's MIDI is
+    // none of its business.
+    midi.addEvent (juce::MidiMessage::allNotesOff (channel), offset);
+    midi.addEvent (juce::MidiMessage::allSoundOff (channel), offset);
+}
+
+void SightLineProcessor::playPreviewNote (int note, int channel, int velocity)
+{
+    if (velocity < 0)
+        queue.push (NoteEvent::off (note, juce::jlimit (1, 16, channel)));
+    else
+        queue.push (NoteEvent::on (note, juce::jlimit (1, 127, velocity), juce::jlimit (1, 16, channel)));
+}
+
+void SightLineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
+{
+    juce::ScopedNoDenormals noDenormals;
+
+    const bool standalone = isStandaloneApp();
+    const int numSamples = buffer.getNumSamples();
+
+    if (standalone)
+    {
+        // The standalone app has no host instrument: play its own kit instead.
+        buffer.clear();
+        synth.setDrumChannel (drumChannel());
+        synth.setGain (p.gain->load() / 100.0f);
+    }
+    // In a DAW the plugin is transparent: whatever reaches it leaves untouched.
+
+    NoteEvent e;
+
+    while (queue.pop (e))
+    {
+        switch (e.type)
+        {
+            case NoteEvent::noteOn:
+                midi.addEvent (juce::MidiMessage::noteOn (e.channel, e.note, (juce::uint8) e.velocity), 0);
+
+                if (standalone && builtInSoundOn())
+                    synth.noteOn (e.note, e.velocity, e.channel);
+
+                break;
+
+            case NoteEvent::noteOff:
+                midi.addEvent (juce::MidiMessage::noteOff (e.channel, e.note), 0);
+
+                if (standalone && builtInSoundOn())
+                    synth.noteOff (e.note, e.channel);
+
+                break;
+
+            case NoteEvent::allNotesOff:
+            default:
+                sendAllNotesOff (midi, 0, melodyChannel());
+
+                if (drumChannel() != melodyChannel())
+                    sendAllNotesOff (midi, 0, drumChannel());
+
+                if (standalone)
+                    synth.allNotesOff();
+
+                break;
+        }
+    }
+
+    if (standalone && synthPrepared)
+    {
+        if (buffer.getNumChannels() > 0)
+        {
+            buffer.clear();
+
+            const int n = juce::jmin (numSamples, buffer.getNumSamples());
+
+            if (buffer.getNumChannels() >= 2)
+                synth.render (buffer.getWritePointer (0), buffer.getWritePointer (1), n);
+            else
+            {
+                std::vector<float> right ((size_t) n, 0.0f);
+                synth.render (buffer.getWritePointer (0), right.data(), n);
+            }
+        }
+    }
+}
+
+//==============================================================================
+void SightLineProcessor::getStateInformation (juce::MemoryBlock& destData)
+{
+    if (auto xml = apvts.copyState().createXml())
+        copyXmlToBinary (*xml, destData);
+}
+
+void SightLineProcessor::setStateInformation (const void* data, int sizeInBytes)
+{
+    if (auto xml = getXmlFromBinary (data, sizeInBytes))
+        if (xml->hasTagName (apvts.state.getType()))
+            apvts.replaceState (juce::ValueTree::fromXml (*xml));
+
+    syncZones();
+}
+
+} // namespace sl
+
+//==============================================================================
+juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
+{
+    return new sl::SightLineProcessor();
+}

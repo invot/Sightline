@@ -165,10 +165,32 @@ void StagePanel::paint (juce::Graphics& g)
         ? cameraName.toUpperCase() + "   " + juce::String (juce::roundToInt (live.fps)) + " FPS"
         : juce::String ("NO CAMERA");
 
-    g.setColour (cameraLive ? pal::dim : pal::pink);
-    g.setFont (uiFont (10.0f, true));
-    g.drawText (status, area.withTrimmedRight (16.0f).removeFromTop (34.0f),
-                juce::Justification::centredRight, false);
+    const auto statusFont = uiFont (10.0f, true);
+
+    if (frame.isValid())
+    {
+        // Over the picture, the text sits on a dark translucent pill so it
+        // stays readable against a bright room.
+        const float width = textWidth (statusFont, status) + 28.0f;
+        const auto pill = juce::Rectangle<float> (area.getRight() - 12.0f - width, area.getY() + 12.0f,
+                                                  width, 26.0f);
+
+        g.setColour (pal::bg.withAlpha (0.72f));
+        g.fillRoundedRectangle (pill, 13.0f);
+        g.setColour (pal::text.withAlpha (0.12f));
+        g.drawRoundedRectangle (pill.reduced (0.5f), 13.0f, 1.0f);
+
+        g.setColour (cameraLive ? pal::text.withAlpha (0.78f) : pal::pink);
+        g.setFont (statusFont);
+        g.drawText (status, pill, juce::Justification::centred, false);
+    }
+    else
+    {
+        g.setColour (cameraLive ? pal::dim : pal::pink);
+        g.setFont (statusFont);
+        g.drawText (status, area.withTrimmedRight (16.0f).removeFromTop (34.0f),
+                    juce::Justification::centredRight, false);
+    }
 
     // ---- what is sounding ------------------------------------------------
     juce::String notes;

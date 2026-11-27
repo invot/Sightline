@@ -8,6 +8,13 @@ The plugin never makes sound in a DAW: it sends MIDI out on the host's plugin MI
 The standalone build adds a small built-in instrument (poly synth + drum kit) so it makes
 noise on its own.
 
+## Download
+
+Every push to `main` builds the Windows installer and the VST3 and publishes them as the
+[**latest**](https://github.com/invot/Sightline/releases/tag/latest) release (see
+`.github/workflows/release.yml`). The installer puts the standalone app in Program Files
+and `SightLine.vst3` in the shared VST3 folder; the zip is the VST3 bundle on its own.
+
 ## Screenshots
 
 **Play**: the rails down both sides of the camera picture, with the overlay switch on top.

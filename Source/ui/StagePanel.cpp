@@ -3,40 +3,63 @@
 namespace sl::ui
 {
 
-namespace
-{
-    juce::Colour accentFor (Overlay o)
-    {
-        switch (o)
-        {
-            case Overlay::Keys:  return pal::teal;
-            case Overlay::Scale: return pal::purple;
-            case Overlay::Drums: return pal::pink;
-        }
-
-        return pal::teal;
-    }
-}
-
 StagePanel::StagePanel (SightLineProcessor& p)
-    : proc (p),
-      overlaySwitch ({ "Keys", "Scale", "Drums" }, pal::teal)
+    : overlaySwitch ({ "Keys", "Scale", "Drums" }, pal::teal),
+      proc (p)
 {
     addAndMakeVisible (overlaySwitch);
-    overlaySwitch.setSelected ((int) proc.currentOverlay(), false);
-    overlaySwitch.setAccent (accentFor (proc.currentOverlay()));
+    syncOverlay();
 
     overlaySwitch.onChange = [this] (int index)
     {
         if (auto* param = proc.apvts.getParameter ("overlay"))
             param->setValueNotifyingHost (param->convertTo0to1 ((float) index));
 
-        overlaySwitch.setAccent (accentFor ((Overlay) index));
-        overlayText.clear();
-        repaint();
+        syncOverlay();
     };
 
     setMouseCursor (juce::MouseCursor::NormalCursor);
+}
+
+void StagePanel::syncOverlay()
+{
+    const int current = (int) proc.currentOverlay();
+
+    if (current == shownOverlay)
+        return;
+
+    shownOverlay = current;
+    overlaySwitch.setSelected (current, false);
+    overlaySwitch.setAccent (accentFor ((Overlay) current));
+    repaint();
+}
+
+Rect StagePanel::visibleFrameArea (int frameWidth, int frameHeight) const
+{
+    if (frameWidth <= 0 || frameHeight <= 0 || getWidth() <= 0 || getHeight() <= 0)
+        return { 0.0f, 0.0f, 1.0f, 1.0f };
+
+    const float stageAspect = (float) getWidth() / (float) getHeight();
+    const float frameAspect = (float) frameWidth / (float) frameHeight;
+
+    // Matches RectanglePlacement::fillDestination | centred in paint().
+    if (stageAspect >= frameAspect)
+    {
+        const float h = frameAspect / stageAspect;
+        return { 0.0f, (1.0f - h) * 0.5f, 1.0f, h };
+    }
+
+    const float w = stageAspect / frameAspect;
+    return { (1.0f - w) * 0.5f, 0.0f, w, 1.0f };
+}
+
+HandSample StagePanel::frameToStage (HandSample hand, int frameWidth, int frameHeight) const
+{
+    // The crop is centred, so this commutes with mirroring.
+    const auto v = visibleFrameArea (frameWidth, frameHeight);
+    hand.x = (hand.x - v.x) / v.w;
+    hand.y = (hand.y - v.y) / v.h;
+    return hand;
 }
 
 void StagePanel::setFrame (const juce::Image& image)
@@ -52,6 +75,11 @@ void StagePanel::setCameraStatus (const juce::String& name, bool live)
 
     cameraName = name.isNotEmpty() ? name : juce::String ("NO CAMERA");
     cameraLive = live;
+
+    // Don't leave the last picture frozen on screen once the camera is gone.
+    if (! live)
+        frame = {};
+
     repaint();
 }
 
@@ -66,8 +94,9 @@ void StagePanel::setOverlayText (const juce::String& text)
 
 void StagePanel::resized()
 {
-    auto area = getLocalBounds();
-    overlaySwitch.setBounds (area.getX() + 16, area.getY() + 16, 236, 30);
+    // Top centre: the rails run nearly the full height down both sides, and the
+    // middle of the picture (the player's face) has no targets.
+    overlaySwitch.setBounds (getLocalBounds().withSizeKeepingCentre (236, 30).withY (12));
 }
 
 void StagePanel::paint (juce::Graphics& g)
@@ -95,7 +124,8 @@ void StagePanel::paint (juce::Graphics& g)
                                         .scaled (-1.0f, 1.0f)
                                         .translated (-area.getCentreX(), 0.0f));
 
-                g.drawImage (frame, area);
+                g.drawImage (frame, area, juce::RectanglePlacement::centred
+                                            | juce::RectanglePlacement::fillDestination);
             }
 
             // A little shade so the translucent keys stay readable on a bright room.
@@ -133,15 +163,22 @@ void StagePanel::paint (juce::Graphics& g)
             if (notes.isNotEmpty())
                 notes << "  ·  ";
 
-            notes << (s == 0 ? "L " : "R ") << juce::String (midiNoteName (live.activeNote[s]).c_str());
+            // The target's own label, so a drum pad reads "Snare", not "D1".
+            juce::String label (midiNoteName (live.activeNote[s]).c_str());
+
+            for (const auto& z : proc.getZones())
+                if (z.side == s && z.note == live.activeNote[s])
+                    label = juce::String (z.label.c_str());
+
+            notes << (s == 0 ? "L  " : "R  ") << label;
         }
     }
 
     if (notes.isNotEmpty())
     {
-        const auto label = notes;
+        const auto font = uiFont (12.0f, true);
         auto textArea = area.removeFromBottom (54.0f).withTrimmedBottom (16.0f);
-        const float width = juce::jmin (260.0f, 26.0f + (float) label.length() * 8.0f);
+        const float width = textWidth (font, notes) + 32.0f;
         auto pill = juce::Rectangle<float> (textArea.getCentreX() - width * 0.5f, textArea.getY(),
                                             width, 26.0f);
 
@@ -149,8 +186,9 @@ void StagePanel::paint (juce::Graphics& g)
         g.fillRoundedRectangle (pill, 13.0f);
         g.setColour (accent.withAlpha (0.8f));
         g.drawRoundedRectangle (pill.reduced (0.5f), 13.0f, 1.0f);
-        g.setFont (uiFont (12.0f, true));
-        g.drawText (label, pill, juce::Justification::centred, false);
+        g.setColour (pal::text);
+        g.setFont (font);
+        g.drawText (notes, pill, juce::Justification::centred, false);
     }
     else if (overlayText.isNotEmpty())
     {
@@ -254,6 +292,16 @@ void StagePanel::drawRails (juce::Graphics& g, juce::Rectangle<float> area)
             g.setFont (uiFont (fontSize, active));
             g.drawText (juce::String (z.label.c_str()), r.reduced (4.0f, 0.0f),
                         juce::Justification::centred, false);
+
+            // Scale degree / GM note number, tucked into the outer corner.
+            if (! z.subLabel.empty() && r.getWidth() >= 90.0f)
+            {
+                g.setColour (active ? juce::Colours::black.withAlpha (0.6f) : pal::dim);
+                g.setFont (uiFont (juce::jmax (8.0f, fontSize - 3.0f)));
+                g.drawText (juce::String (z.subLabel.c_str()), r.reduced (8.0f, 0.0f),
+                            z.side == 0 ? juce::Justification::centredLeft
+                                        : juce::Justification::centredRight, false);
+            }
         }
     }
 }

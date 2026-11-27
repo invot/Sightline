@@ -136,7 +136,8 @@ ZoneLayout buildZones (Overlay overlay, int root, ScaleType scale, int octave)
                     z.side = side;
                     z.note = notes[(size_t) i];
                     z.label = midiNoteName (z.note);
-                    z.subLabel = std::to_string (((z.note - root) % 12 + 12) % 12 + 1);
+                    // Scale degree (1 = the root), not the semitone offset.
+                    z.subLabel = std::to_string (scaleDegree (z.note, root, scale));
                     z.bounds = rowBounds (rail, i, n);
                     layout.zones.push_back (z);
                 }

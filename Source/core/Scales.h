@@ -31,6 +31,12 @@ bool noteInScale (int note, int root, ScaleType s) noexcept;
 /** "C major", "F# minor", ... */
 std::string keyName (int root, ScaleType s);
 
+/** "C", "C#", ... for a pitch class (any int, wrapped to 0..11). */
+const char* pitchClassName (int pc) noexcept;
+
+/** 1-based position of `note` in root/scale (1 = root), or 0 if out of key. */
+int scaleDegree (int note, int root, ScaleType s) noexcept;
+
 /** The in-key notes between `lowNote` and `highNote`, ascending. */
 std::vector<int> notesInRange (int lowNote, int highNote, int root, ScaleType s);
 

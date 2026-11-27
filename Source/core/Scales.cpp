@@ -72,6 +72,28 @@ bool noteInScale (int note, int root, ScaleType s) noexcept
 
 static const char* noteNames[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
 
+const char* pitchClassName (int pc) noexcept
+{
+    return noteNames[((pc % 12) + 12) % 12];
+}
+
+int scaleDegree (int note, int root, ScaleType s) noexcept
+{
+    const int pc = ((note - root) % 12 + 12) % 12;
+    const auto mask = scaleMask (s);
+
+    if ((mask & (1u << pc)) == 0)
+        return 0;
+
+    int degree = 1;
+
+    for (int i = 0; i < pc; ++i)
+        if ((mask & (1u << i)) != 0)
+            ++degree;
+
+    return degree;
+}
+
 std::string midiNoteName (int note)
 {
     const int pc = ((note % 12) + 12) % 12;

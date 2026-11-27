@@ -8,6 +8,29 @@ The plugin never makes sound in a DAW: it sends MIDI out on the host's plugin MI
 The standalone build adds a small built-in instrument (poly synth + drum kit) so it makes
 noise on its own.
 
+## Screenshots
+
+**Play**: the rails down both sides of the camera picture, with the overlay switch on top.
+A hand is resting on E4 on the right rail.
+
+![Play page, Keys overlay](docs/screenshots/play.png)
+
+**Play, Drums overlay**: the same eight-piece kit on both rails, with each pad's General
+MIDI note number in its corner.
+
+![Play page, Drums overlay](docs/screenshots/play-drums.png)
+
+**Key**: key, scale and octave, and what each rail will play.
+
+![Key page](docs/screenshots/key.png)
+
+**Setup**: camera, how playing feels, and MIDI out.
+
+![Setup page](docs/screenshots/setup.png)
+
+These are rendered offscreen by the smoke harness, which has no camera attached, so the
+picture behind the rails is a drawn test frame (see [Building](#building) to regenerate them).
+
 ## Building
 
 Everything is built with the portable toolchain in `.tools` (MinGW-w64 GCC 16.2, CMake
@@ -28,10 +51,11 @@ build/SightLineTests.exe       # zone map / dwell gate / detector / synth checks
 build/SightLineSmoke.exe       # offscreen end-to-end harness (SIGHTLINE_NO_CAMERA=1)
 ```
 
-The smoke harness can also render the UI pages to PNG:
+The smoke harness can also render the UI pages to PNG. This is how the README
+screenshots are made:
 
 ```bash
-SIGHTLINE_SNAPSHOT_DIR=build-logs/snap ./build/SightLineSmoke.exe
+SIGHTLINE_SNAPSHOT_DIR=docs/screenshots ./build/SightLineSmoke.exe
 ```
 
 `.tools/JUCE-8.0.6` carries a handful of small patches so JUCE 8 builds under MinGW:

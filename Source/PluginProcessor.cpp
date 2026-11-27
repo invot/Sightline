@@ -11,17 +11,15 @@ juce::AudioProcessorEditor* SightLineProcessor::createEditor()
 
 namespace
 {
-    juce::StringArray choiceStrings (const char* const* items, int count)
+    juce::StringArray rootNames()
     {
         juce::StringArray a;
 
-        for (int i = 0; i < count; ++i)
-            a.add (items[i]);
+        for (int pc = 0; pc < numPitchClasses; ++pc)
+            a.add (pitchClassName (pc));
 
         return a;
     }
-
-    const char* const rootNames[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
 }
 
 SightLineProcessor::SightLineProcessor()
@@ -63,7 +61,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout SightLineProcessor::createLa
 
     layout.add (std::make_unique<AudioParameterChoice> (
         ParameterID { "keyRoot", 1 }, "Key",
-        choiceStrings (rootNames, 12), 0));
+        rootNames(), 0));
 
     StringArray scales;
 
@@ -123,10 +121,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout SightLineProcessor::createLa
 }
 
 //==============================================================================
-void SightLineProcessor::prepareToPlay (double sampleRate, int)
+void SightLineProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
-    preparedRate = sampleRate;
     synth.prepare (sampleRate);
+    monoScratch.assign ((size_t) juce::jmax (1, samplesPerBlock), 0.0f);
     synthPrepared = true;
     queue.readPos.store (queue.writePos.load());
 }
@@ -230,9 +228,6 @@ void SightLineProcessor::syncZones()
     lastOctave = octave;
     lastMelodyChan = mel;
     lastDrumChan = drum;
-    lastVelocity = vel;
-    lastDwell = dwell;
-    lastRelease = release;
     lastDrums = drums;
 }
 
@@ -329,6 +324,15 @@ void SightLineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
         buffer.clear();
         synth.setDrumChannel (drumChannel());
         synth.setGain (p.gain->load() / 100.0f);
+
+        // Switching the built-in sound off must also silence what it is
+        // holding: its note-offs are skipped from now on.
+        const bool builtInOn = builtInSoundOn();
+
+        if (builtInWasOn && ! builtInOn)
+            synth.allNotesOff();
+
+        builtInWasOn = builtInOn;
     }
     // In a DAW the plugin is transparent: whatever reaches it leaves untouched.
 
@@ -377,11 +381,22 @@ void SightLineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
             const int n = juce::jmin (numSamples, buffer.getNumSamples());
 
             if (buffer.getNumChannels() >= 2)
+            {
                 synth.render (buffer.getWritePointer (0), buffer.getWritePointer (1), n);
+            }
             else
             {
-                std::vector<float> right ((size_t) n, 0.0f);
-                synth.render (buffer.getWritePointer (0), right.data(), n);
+                // Mono bus: render into a scratch right channel (sized in
+                // prepareToPlay, so nothing is allocated here) and fold it in.
+                if (monoScratch.size() < (size_t) n)
+                    return;
+
+                std::fill_n (monoScratch.begin(), n, 0.0f);
+                auto* left = buffer.getWritePointer (0);
+                synth.render (left, monoScratch.data(), n);
+
+                for (int i = 0; i < n; ++i)
+                    left[i] += monoScratch[(size_t) i];
             }
         }
     }

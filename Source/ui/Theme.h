@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../core/Types.h"
+
 #include <juce_gui_basics/juce_gui_basics.h>
 
 namespace sl::ui
@@ -20,6 +22,19 @@ namespace pal
     inline const juce::Colour purple    { 0xffa99bff };
     inline const juce::Colour yellow    { 0xfff3e3a6 };
     inline const juce::Colour amber     { 0xffe9b06a };
+}
+
+/** The colour each overlay is drawn in, shared by every page. */
+inline juce::Colour accentFor (Overlay o)
+{
+    switch (o)
+    {
+        case Overlay::Keys:  return pal::teal;
+        case Overlay::Scale: return pal::purple;
+        case Overlay::Drums: return pal::pink;
+    }
+
+    return pal::teal;
 }
 
 inline juce::Font uiFont (float height, bool bold = false)
@@ -58,6 +73,11 @@ inline void drawCaption (juce::Graphics& g, juce::Rectangle<int> area, const juc
     g.setColour (pal::dim);
     g.setFont (uiFont (10.0f, true));
     g.drawText (text.toUpperCase(), area.toFloat(), juce::Justification::centredLeft, false);
+}
+
+inline float textWidth (const juce::Font& font, const juce::String& text)
+{
+    return juce::GlyphArrangement::getStringWidth (font, text);
 }
 
 //==============================================================================

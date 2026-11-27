@@ -72,14 +72,11 @@ int GestureEngine::hitTest (int side, float x, float y) const
         if (z.side != side)
             continue;
 
-        if (! z.bounds.inflated (0.0f).contains (x, y))
-        {
-            const Rect grown = { z.bounds.x - hitMarginX, z.bounds.y - hitMarginY,
-                                 z.bounds.w + 2.0f * hitMarginX, z.bounds.h + 2.0f * hitMarginY };
+        const Rect grown = { z.bounds.x - hitMarginX, z.bounds.y - hitMarginY,
+                             z.bounds.w + 2.0f * hitMarginX, z.bounds.h + 2.0f * hitMarginY };
 
-            if (! grown.contains (x, y))
-                continue;
-        }
+        if (! grown.contains (x, y))
+            continue;
 
         // The narrower target wins, so the short keys of the keyboard keep
         // their own slice of the rail.

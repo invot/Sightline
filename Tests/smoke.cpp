@@ -309,6 +309,23 @@ int main()
                     juce::MessageManager::getInstance()->runDispatchLoopUntil (60);
                     save ("play");
 
+                    // The same frame with the drum kit on the rails.
+                    if (auto* overlayParam = dynamic_cast<juce::AudioParameterChoice*> (proc->apvts.getParameter ("overlay")))
+                    {
+                        *overlayParam = 2;
+                        proc->syncZones();
+
+                        const auto frame = makeCameraImage (960, 540, 0.09f, 0.55f);
+                        sight->feedFrame (frame);
+                        juce::Thread::sleep (140);
+                        sight->feedFrame (frame);
+                        juce::MessageManager::getInstance()->runDispatchLoopUntil (60);
+                        save ("play-drums");
+
+                        *overlayParam = 0;
+                        proc->syncZones();
+                    }
+
                     tabs->setSelected (1, true);
                     juce::MessageManager::getInstance()->runDispatchLoopUntil (60);
                     save ("key");

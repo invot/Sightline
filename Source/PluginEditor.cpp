@@ -1,8 +1,6 @@
 #include "PluginEditor.h"
 #include "StandaloneBridge.h"
 
-#include <juce_video/juce_video.h>
-
 namespace sl
 {
 
@@ -154,9 +152,11 @@ void SightLineEditor::feedFrame (const juce::Image& image)
     const int w = source.getWidth();
     const int h = source.getHeight();
 
-    // JUCE's Image::RGB keeps its bytes in BGR order, while the detector works on
-    // packed RGB, so repack once per frame into a reused buffer.
+    // JUCE keeps its pixels in BGR(A) order, while the detector works on packed
+    // RGB, so repack once per frame into a reused buffer. The pixel stride is
+    // read from the bitmap: native (Direct2D) RGB images store 4 bytes a pixel.
     rgbScratch.resize ((size_t) w * (size_t) h * 3u);
+    const auto stride = (size_t) data.pixelStride;
 
     for (int y = 0; y < h; ++y)
     {
@@ -165,7 +165,7 @@ void SightLineEditor::feedFrame (const juce::Image& image)
 
         for (int x = 0; x < w; ++x)
         {
-            const auto* px = row + (size_t) x * 3u;
+            const auto* px = row + (size_t) x * stride;
             dst[x * 3]     = px[2];
             dst[x * 3 + 1] = px[1];
             dst[x * 3 + 2] = px[0];
@@ -186,6 +186,10 @@ void SightLineEditor::feedFrame (const juce::Image& image)
         right.x = 1.0f - right.x;
         std::swap (left, right);
     }
+
+    // The stage crops the picture to fill without stretching it.
+    left  = stage.frameToStage (left, w, h);
+    right = stage.frameToStage (right, w, h);
 
     proc.updateHands (left, right, juce::Time::getMillisecondCounterHiRes());
 
@@ -241,13 +245,14 @@ void SightLineEditor::timerCallback()
     }
 
     // ---- housekeeping ----------------------------------------------------
-    stage.overlaySwitch.setSelected ((int) proc.currentOverlay(), false);
+    stage.syncOverlay();
 
     if (testNoteOffTicks > 0 && --testNoteOffTicks == 0)
         proc.playPreviewNote (testNote, testChannel, -1);
 
-    if (++cameraRetryTicks % 30 == 0)
+    if (++housekeepingTicks >= 30)
     {
+        housekeepingTicks = 0;
         standalone::unmuteInput();
         standalone::syncMidiOutput();
         setupPage.setStandaloneInfo (proc.isStandaloneApp(), standalone::midiOutputName());
@@ -266,6 +271,11 @@ void SightLineEditor::timerCallback()
 
 void SightLineEditor::triggerTestNote()
 {
+    // A second click before the first note ended: finish that one first, or
+    // it would never get its note-off if the overlay or channel changed.
+    if (testNoteOffTicks > 0)
+        proc.playPreviewNote (testNote, testChannel, -1);
+
     const bool drums = proc.currentOverlay() == Overlay::Drums;
     testNote = drums ? 38 : 60;
     testChannel = drums ? proc.drumChannel() : proc.melodyChannel();
@@ -328,51 +338,54 @@ void SightLineEditor::paint (juce::Graphics& g)
     g.drawText ("gesture  >  midi", h.withTrimmedLeft (145.0f).withWidth (170.0f),
                 juce::Justification::centredLeft, false);
 
-    // right-hand readout
+    // ---- right-hand readout: what is being played, and where it goes -----
     const auto overlay = proc.currentOverlay();
-    const juce::String overlayLabel = juce::String (overlayName (overlay)).toUpperCase();
+    const bool drums = overlay == Overlay::Drums;
+    const int channel = drums ? proc.drumChannel() : proc.melodyChannel();
+
+    const auto dot = juce::String::charToString ((juce::juce_wchar) 0x00b7);
+    juce::String readout = juce::String (overlayName (overlay)).toUpperCase();
+
+    if (overlay == Overlay::Scale)
+        readout << "  " << juce::String (keyName (proc.currentRoot(), proc.currentScale()).c_str()).toUpperCase();
+
+    readout << "   " << dot << "   CH " << channel;
+
+    const auto readoutFont = uiFont (11.0f, true);
+    auto readoutArea = h.withTrimmedRight (audioButton.isVisible() ? 194.0f : 22.0f);
+    const float readoutW = textWidth (readoutFont, readout);
 
     g.setColour (pal::text.withAlpha (0.85f));
-    g.setFont (uiFont (11.0f, true));
-    g.drawText (overlayLabel + "   ·   MIDI " + juce::String (proc.melodyChannel())
-                    + (overlay == Overlay::Drums ? "" : " / " + juce::String (proc.drumChannel())),
-                h.withTrimmedRight (audioButton.isVisible() ? 190.0f : 22.0f)
-                 .withWidth (330.0f),
+    g.setFont (readoutFont);
+    g.drawText (readout, readoutArea.removeFromRight (readoutW + 2.0f),
                 juce::Justification::centredRight, false);
 
-    g.setColour (pal::purple);
-    g.fillEllipse (h.getRight() - (audioButton.isVisible() ? 206.0f : 38.0f), h.getCentreY() - 4.0f,
-                   8.0f, 8.0f);
+    // Status dot: the overlay colour while the camera is live, pink without one.
+    readoutArea.removeFromRight (10.0f);
+    g.setColour (cameraIndexOpened >= 0 ? accentFor (overlay) : pal::pink);
+    g.fillEllipse (readoutArea.removeFromRight (8.0f).withSizeKeepingCentre (8.0f, 8.0f));
 
     // ---- footer ----------------------------------------------------------
     auto f = footerArea.toFloat();
     g.setColour (pal::header);
     g.fillRoundedRectangle (f, 12.0f);
 
-    g.setColour (pal::dim);
-    g.setFont (uiFont (11.0f));
+    const juce::String footerText = cameraIndexOpened >= 0
+        ? "Camera is live. Hands are read on this machine; nothing is recorded or sent anywhere."
+        : "No camera: open Setup and pick one. Windows may ask for permission the first time.";
 
-    juce::String footerText;
-
-    if (cameraIndexOpened >= 0)
-        footerText = "Camera is live. Hands are read on this machine; nothing is recorded or sent anywhere.";
-    else
-        footerText = "No camera: open Setup and pick one. Windows may ask for permission the first time.";
-
-    if (overlay == Overlay::Drums)
-        footerText << "   Drums go out on channel " << proc.drumChannel() << ".";
-    else
-        footerText << "   Notes go out on channel " << proc.melodyChannel() << ".";
-
-    g.drawText (footerText, f.withTrimmedLeft (16.0f).withWidth (f.getWidth() - 320.0f),
-                juce::Justification::centredLeft, true);
-
-    const juce::String right = juce::String (juce::roundToInt (fps)) + " FPS   ·   DWELL "
-                             + juce::String (juce::roundToInt (proc.dwellMs())) + " ms";
+    const juce::String timing = "DWELL " + juce::String (juce::roundToInt (proc.dwellMs())) + " ms   "
+                              + dot + "   RELEASE "
+                              + juce::String (juce::roundToInt (proc.releaseMs())) + " ms";
 
     g.setColour (pal::text.withAlpha (0.55f));
     g.setFont (uiFont (10.5f, true));
-    g.drawText (right, f.withTrimmedRight (18.0f), juce::Justification::centredRight, false);
+    g.drawText (timing, f.withTrimmedRight (18.0f), juce::Justification::centredRight, false);
+
+    g.setColour (pal::dim);
+    g.setFont (uiFont (11.0f));
+    g.drawText (footerText, f.withTrimmedLeft (16.0f).withTrimmedRight (240.0f),
+                juce::Justification::centredLeft, true);
 }
 
 void SightLineEditor::resized()

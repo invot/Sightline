@@ -37,6 +37,7 @@ public:
     void releaseResources() override;
     void reset() override;
     void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
+    using juce::AudioProcessor::processBlock;
     bool isBusesLayoutSupported (const BusesLayout&) const override;
 
     juce::AudioProcessorEditor* createEditor() override;
@@ -160,12 +161,11 @@ private:
 
     int lastOverlay = -1, lastRoot = -1, lastScale = -1, lastOctave = -1;
     int lastMelodyChan = -1, lastDrumChan = -1;
-    int lastVelocity = -1;
-    double lastDwell = -1.0, lastRelease = -1.0;
     bool lastDrums = false;
 
-    double preparedRate = 48000.0;
     bool synthPrepared = false;
+    bool builtInWasOn = true;           // audio thread only
+    std::vector<float> monoScratch;     // right channel for a mono output bus
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SightLineProcessor)
 };

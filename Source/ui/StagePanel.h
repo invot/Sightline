@@ -21,12 +21,24 @@ public:
     void setCameraStatus (const juce::String& name, bool live);
     void setOverlayText (const juce::String&);
 
+    /** Follows the overlay parameter when it changes from outside the switch
+        (automation, undo, preset load). */
+    void syncOverlay();
+
+    /** The picture fills the stage without being stretched, so part of the
+        frame is cropped. Converts a hand position from frame coordinates
+        (0..1) to stage coordinates, which is where the targets live. */
+    HandSample frameToStage (HandSample, int frameWidth, int frameHeight) const;
+
     SegmentedControl overlaySwitch;
 
 private:
     void drawPlaceholder (juce::Graphics&, juce::Rectangle<float>);
     void drawRails (juce::Graphics&, juce::Rectangle<float>);
     void drawHands (juce::Graphics&, juce::Rectangle<float>);
+
+    /** The part of a frame that is visible on the stage, in 0..1 frame units. */
+    Rect visibleFrameArea (int frameWidth, int frameHeight) const;
 
     juce::Rectangle<float> toStage (juce::Rectangle<float> area, const Rect& norm) const
     {
@@ -40,6 +52,7 @@ private:
     juce::String cameraName { "NO CAMERA" };
     bool cameraLive = false;
     juce::String overlayText;
+    int shownOverlay = -1;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (StagePanel)
 };

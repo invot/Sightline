@@ -59,8 +59,6 @@ void SetupPanel::timerCallback()
 
     if (cameraCombo.getSelectedId() != wanted && cameraCombo.getNumItems() >= wanted && wanted > 0)
         cameraCombo.setSelectedId (wanted, juce::dontSendNotification);
-
-    repaint();
 }
 
 void SetupPanel::setCameraNames (const juce::StringArray& names, int current)
@@ -72,8 +70,6 @@ void SetupPanel::setCameraNames (const juce::StringArray& names, int current)
     else
         for (int i = 0; i < names.size(); ++i)
             cameraCombo.addItem (names[i], i + 1);
-
-    lastCameraSelection = current;
 
     if (cameraCombo.getNumItems() > 0)
         cameraCombo.setSelectedId (juce::jlimit (1, cameraCombo.getNumItems(), current + 1),
@@ -94,6 +90,11 @@ void SetupPanel::setCameraStatus (const juce::String& name, bool live)
 
 void SetupPanel::setStandaloneInfo (bool isStandalone, const juce::String& midiOut)
 {
+    // Called once a second by the editor: only relayout when something changed.
+    if (standaloneKnown && isStandalone == standalone && midiOut == midiStatus)
+        return;
+
+    standaloneKnown = true;
     standalone = isStandalone;
     midiStatus = midiOut;
     builtInPill.setVisible (standalone);
@@ -116,34 +117,28 @@ void SetupPanel::paint (juce::Graphics& g)
 
     g.setColour (cameraLive ? pal::teal : pal::pink);
     g.setFont (uiFont (10.5f, true));
-    g.drawFittedText (cameraStatus.toUpperCase(),
-                      cameraCard.withTrimmedTop (204).withTrimmedLeft (16).withHeight (16),
-                      juce::Justification::centredLeft, 1);
+    g.drawFittedText (cameraStatus.toUpperCase(), cameraStatusArea, juce::Justification::centredLeft, 1);
 
     g.setColour (pal::dim);
     g.setFont (uiFont (10.5f));
     g.drawFittedText ("The picture never leaves this machine: frames are analysed here and thrown away.",
-                      cameraCard.withTrimmedTop (230).reduced (16, 0).withTrimmedBottom (18),
-                      juce::Justification::topLeft, 3);
+                      cameraNoteArea, juce::Justification::topLeft, 3);
 
     g.drawFittedText ("Dwell is how long a hand rests on a target before it counts. "
                       "Release is how long the note rings after the hand leaves.",
-                      playCard.withTrimmedTop (238).reduced (16, 0).withTrimmedBottom (18),
-                      juce::Justification::topLeft, 3);
+                      playNoteArea, juce::Justification::topLeft, 3);
 
     juce::String midiText;
 
     if (standalone)
         midiText = midiStatus.isNotEmpty()
                      ? "MIDI out: " + midiStatus
-                     : juce::String ("No MIDI output chosen: the built-in sound plays instead.");
+                     : juce::String ("No MIDI output chosen: the built-in sound plays instead. "
+                                     "Pick a device under Audio / MIDI settings.");
     else
         midiText = "In a DAW, notes go to the instrument on this track. Audio passes through untouched.";
 
-    g.setColour (pal::dim);
-    g.setFont (uiFont (10.5f));
-    g.drawFittedText (midiText, midiCard.withTrimmedTop (300).reduced (16, 0).withTrimmedBottom (18),
-                      juce::Justification::topLeft, 4);
+    g.drawFittedText (midiText, midiNoteArea, juce::Justification::topLeft, 4);
 }
 
 void SetupPanel::resized()
@@ -166,18 +161,23 @@ void SetupPanel::resized()
     mirrorPill.setBounds (c.removeFromTop (28).withWidth (120));
     c.removeFromTop (12);
     sensitivity.setBounds (c.removeFromTop (30));
-    c.removeFromTop (86);   // status + privacy note, drawn in paint
+    c.removeFromTop (20);
+    cameraStatusArea = c.removeFromTop (16);
+    c.removeFromTop (8);
+    cameraNoteArea = c.withTrimmedBottom (16);
 
     // ---- playing ---------------------------------------------------------
     auto pArea = playCard.reduced (16, 0);
     pArea.removeFromTop (58);
-    dwell.setBounds (pArea.removeFromTop (30));
-    pArea.removeFromTop (10);
-    release.setBounds (pArea.removeFromTop (30));
-    pArea.removeFromTop (10);
-    velocity.setBounds (pArea.removeFromTop (30));
-    pArea.removeFromTop (10);
-    opacity.setBounds (pArea.removeFromTop (30));
+
+    for (auto* row : { &dwell, &release, &velocity, &opacity })
+    {
+        row->setBounds (pArea.removeFromTop (30));
+        pArea.removeFromTop (10);
+    }
+
+    pArea.removeFromTop (14);
+    playNoteArea = pArea.withTrimmedBottom (16);
 
     // ---- MIDI ------------------------------------------------------------
     auto m = midiCard.reduced (16, 0);
@@ -185,12 +185,21 @@ void SetupPanel::resized()
     melodyChan.setBounds (m.removeFromTop (58));
     m.removeFromTop (10);
     drumChan.setBounds (m.removeFromTop (58));
-    m.removeFromTop (10);
-    builtInPill.setBounds (m.removeFromTop (28).withWidth (150));
-    m.removeFromTop (8);
-    volume.setBounds (m.removeFromTop (30));
-    m.removeFromTop (12);
+    m.removeFromTop (16);
+
+    // The built-in instrument only exists in the standalone app; in a DAW its
+    // controls are hidden, so don't leave a hole where they would be.
+    if (standalone)
+    {
+        builtInPill.setBounds (m.removeFromTop (28).withWidth (150));
+        m.removeFromTop (8);
+        volume.setBounds (m.removeFromTop (30));
+        m.removeFromTop (16);
+    }
+
     testButton.setBounds (m.removeFromTop (30).withWidth (160));
+    m.removeFromTop (14);
+    midiNoteArea = m.withTrimmedBottom (16);
 }
 
 } // namespace sl::ui

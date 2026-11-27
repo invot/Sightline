@@ -161,6 +161,8 @@ public:
         slider.setColour (juce::Slider::thumbColourId, accentColour);
         slider.setColour (juce::Slider::trackColourId, accentColour.withAlpha (0.65f));
         slider.setColour (juce::Slider::backgroundColourId, pal::stroke);
+        // The value readout is painted by this row, not the slider.
+        slider.onValueChange = [this] { repaint(); };
         addAndMakeVisible (slider);
     }
 
@@ -203,8 +205,8 @@ private:
 class LabelledCombo : public juce::Component
 {
 public:
-    explicit LabelledCombo (juce::String caption, juce::Colour accentColour = pal::teal)
-        : cap (std::move (caption)), accent (accentColour)
+    explicit LabelledCombo (juce::String caption)
+        : cap (std::move (caption))
     {
         addAndMakeVisible (box);
     }
@@ -239,7 +241,6 @@ public:
 
 private:
     juce::String cap;
-    juce::Colour accent;
     std::unique_ptr<APVTS::ComboBoxAttachment> attachment;
 };
 

@@ -3,11 +3,6 @@
 namespace sl::ui
 {
 
-namespace
-{
-    const char* const pitchNames[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
-}
-
 KeyPanel::KeyPanel (SightLineProcessor& p)
     : proc (p)
 {
@@ -25,10 +20,9 @@ KeyPanel::KeyPanel (SightLineProcessor& p)
     {
         if (auto* param = dynamic_cast<juce::AudioParameterInt*> (proc.apvts.getParameter ("octave")))
             param->setValueNotifyingHost (param->convertTo0to1 ((float) (octaveCombo.getSelectedId() - 3)));
-
-        repaint();
     };
 
+    timerCallback();
     startTimerHz (10);
 }
 
@@ -36,14 +30,17 @@ KeyPanel::~KeyPanel() { stopTimer(); }
 
 void KeyPanel::timerCallback()
 {
-    const int o = proc.currentOctave();
+    const Shown now { (int) proc.currentOverlay(), proc.currentRoot(), (int) proc.currentScale(),
+                      proc.currentOctave(), proc.drumChannel() };
 
-    if (o != lastOctave)
-    {
-        lastOctave = o;
-        octaveCombo.setSelectedId (o + 3, juce::dontSendNotification);
-        repaint();
-    }
+    if (now == shown)
+        return;
+
+    if (now.octave != shown.octave)
+        octaveCombo.setSelectedId (now.octave + 3, juce::dontSendNotification);
+
+    shown = now;
+    repaint();
 }
 
 void KeyPanel::paint (juce::Graphics& g)
@@ -55,6 +52,8 @@ void KeyPanel::paint (juce::Graphics& g)
     auto railHeader = railCard;
     drawSectionHeader (g, keyHeader.removeFromTop (46).withTrimmedLeft (16), "Key & Scale", pal::purple);
     drawSectionHeader (g, railHeader.removeFromTop (46).withTrimmedLeft (16), "The rails", pal::teal);
+
+    drawCaption (g, octaveCaption, "Octave");
 
     // ---- pitch class map --------------------------------------------------
     drawPitchClassMap (g, chipArea);
@@ -68,11 +67,9 @@ void KeyPanel::paint (juce::Graphics& g)
     // ---- what each rail plays --------------------------------------------
     const auto overlay = proc.currentOverlay();
     const int base = baseNoteForOctave (proc.currentOctave());
-    const auto accent = overlay == Overlay::Drums ? pal::pink
-                      : overlay == Overlay::Scale ? pal::purple
-                                                  : pal::teal;
+    const auto accent = accentFor (overlay);
 
-    auto area = railCard;
+    auto area = railCard.reduced (16, 0);
     area.removeFromTop (58);
 
     const int perSide = [&]
@@ -92,10 +89,11 @@ void KeyPanel::paint (juce::Graphics& g)
 
     for (int side = 0; side < 2; ++side)
     {
-        auto col = listArea.withWidth (listArea.getWidth() / 2);
+        const int colGap = 12;
+        auto col = listArea.withWidth ((listArea.getWidth() - colGap) / 2);
 
         if (side == 1)
-            col = col.translated (col.getWidth(), 0);
+            col = col.translated (col.getWidth() + colGap, 0);
 
         auto header = col.removeFromTop (18);
 
@@ -177,9 +175,6 @@ void KeyPanel::paint (juce::Graphics& g)
     g.setColour (pal::dim);
     g.setFont (uiFont (11.0f));
     g.drawFittedText (explain, area.removeFromBottom (58), juce::Justification::topLeft, 3);
-
-    g.setColour (accent.withAlpha (0.7f));
-    g.fillRoundedRectangle (railCard.toFloat().removeFromBottom (3.0f), 1.5f);
 }
 
 void KeyPanel::drawPitchClassMap (juce::Graphics& g, juce::Rectangle<int> area)
@@ -206,7 +201,7 @@ void KeyPanel::drawPitchClassMap (juce::Graphics& g, juce::Rectangle<int> area)
 
         g.setColour (member ? juce::Colours::black.withAlpha (0.85f) : pal::dim.withAlpha (0.7f));
         g.setFont (uiFont (11.5f, member));
-        g.drawText (pitchNames[pc], cell, juce::Justification::centred, false);
+        g.drawText (pitchClassName (pc), cell, juce::Justification::centred, false);
     }
 }
 
@@ -226,8 +221,9 @@ void KeyPanel::resized()
     scaleCombo.setBounds (row1.withTrimmedLeft (12));
 
     left.removeFromTop (10);
-    auto row2 = left.removeFromTop (58);
-    octaveCombo.setBounds (row2.removeFromLeft (120).withTrimmedTop (18));
+    auto row2 = left.removeFromTop (58).removeFromLeft (120);
+    octaveCaption = row2.removeFromTop (14);
+    octaveCombo.setBounds (row2.withTrimmedTop (2));
 
     left.removeFromTop (18);
     chipArea = left.removeFromTop (86);

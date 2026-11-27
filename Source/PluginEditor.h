@@ -2,10 +2,10 @@
 
 #include "PluginProcessor.h"
 #include "ui/KeyPanel.h"
-
-#include <juce_video/juce_video.h>
 #include "ui/SetupPanel.h"
 #include "ui/StagePanel.h"
+
+#include <juce_video/juce_video.h>
 
 namespace sl
 {
@@ -51,7 +51,8 @@ private:
     juce::CameraDevice::Listener* listenerRegistered = nullptr;
     juce::StringArray cameraNames;
     int cameraIndexOpened = -1;
-    int cameraRetryTicks = 0;
+    int cameraRetryTicks = 0;      // counts towards reopening a camera that failed
+    int housekeepingTicks = 0;     // once-a-second status refresh
 
     juce::CriticalSection frameLock;
     juce::Image pendingFrame;

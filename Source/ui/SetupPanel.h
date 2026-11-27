@@ -36,18 +36,18 @@ private:
     SliderRow dwell       { "Dwell", pal::amber, " ms" };
     SliderRow release     { "Release", pal::amber, " ms" };
     SliderRow velocity    { "Velocity", pal::purple, "" };
-    SliderRow opacity     { "Overlay", pal::teal, " %" };
+    SliderRow opacity     { "Opacity", pal::teal, " %" };
     SliderRow volume      { "Volume", pal::pink, " %" };
 
-    LabelledCombo melodyChan { "Melody channel", pal::purple };
-    LabelledCombo drumChan { "Drum channel", pal::pink };
+    LabelledCombo melodyChan { "Melody channel" };
+    LabelledCombo drumChan { "Drum channel" };
 
     juce::TextButton testButton { "Send a test note" };
 
     juce::Rectangle<int> cameraCard, playCard, midiCard;
+    juce::Rectangle<int> cameraStatusArea, cameraNoteArea, playNoteArea, midiNoteArea;
     juce::String cameraStatus { "NO CAMERA" }, midiStatus;
-    bool cameraLive = false, standalone = false;
-    int lastCameraSelection = -1;
+    bool cameraLive = false, standalone = false, standaloneKnown = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SetupPanel)
 };

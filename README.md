@@ -51,8 +51,9 @@ than a live feed (see [Building](#building) to regenerate them).
 
 ## Building
 
-Everything is built with the portable toolchain in `.tools` (MinGW-w64 GCC 16.2, CMake
-3.31.6, JUCE 8.0.6), so no Visual Studio install is required.
+On Windows everything is built with the portable toolchain in `.tools` (MinGW-w64 GCC
+16.2, CMake 3.31.6, JUCE 8.0.6), so no Visual Studio install is required. macOS has its
+own script, described under [macOS](#macos).
 
 ```bash
 ./build.sh            # configure (first run) and build everything
@@ -79,7 +80,51 @@ SIGHTLINE_SNAPSHOT_DIR=docs/screenshots ./build/SightLineSmoke.exe
 `.tools/JUCE-8.0.6` carries a handful of small patches so JUCE 8 builds under MinGW:
 the platform check, a few DirectShow/Windows Media gaps, Direct2D GUIDs, and the manifest
 handling (see the comments at each patch site). A fresh JUCE checkout would need them
-re-applied.
+re-applied. Every patch sits behind `JUCE_WINDOWS` or `MINGW`, so the same tree also
+builds on macOS.
+
+### macOS
+
+The macOS script builds universal Apple Silicon + Intel VST3 and standalone bundles for
+macOS 11 or newer with Apple Clang, into a separate `build-macos/` tree. Install the
+developer tools and CMake 3.22+, then get the same JUCE version the Windows build uses:
+
+```bash
+xcode-select --install   # if the developer tools are not installed yet
+brew install cmake
+git clone --depth 1 --branch 8.0.6 https://github.com/juce-framework/JUCE.git .tools/JUCE-8.0.6
+
+bash ./build-macos.sh          # configure (first run) and build the VST3 and app
+bash ./build-macos.sh clean    # wipe build-macos/ first
+bash ./build-macos.sh tests    # build and run the core tests only
+bash ./build-macos.sh smoke    # render the screenshots (needs a desktop session)
+```
+
+Outputs:
+
+```text
+build-macos/SightLine_artefacts/Release/VST3/sightline.vst3
+build-macos/SightLine_artefacts/Release/Standalone/sightline.app
+```
+
+Copy the whole `sightline.vst3` bundle into `~/Library/Audio/Plug-Ins/VST3/`, and
+`sightline.app` into `/Applications` if you want it there. The script makes local builds
+only: it does not sign, notarize or publish them, so another Mac (or a DAW on it) has to
+be told to trust the build, or you have to sign it with your own Developer ID.
+
+Set `SL_JUCE_DIR=/path/to/JUCE` to build against another JUCE 8.0.6 checkout, and
+`SL_MACOS_ARCHITECTURES=arm64` (or `x86_64`) for a single-architecture build rather than
+the universal default. `MACOSX_DEPLOYMENT_TARGET` changes the minimum macOS version
+(default 11.0) and `JOBS=4` limits build parallelism:
+
+```bash
+SL_JUCE_DIR="$HOME/JUCE" SL_MACOS_ARCHITECTURES=arm64 bash ./build-macos.sh
+```
+
+Hand tracking on macOS uses the [basic tracker](#the-basic-tracker): the MediaPipe
+landmark model runs on ONNX Runtime, and only the Windows runtime is wired into CMake, so
+a macOS build configures with the hand model off. Everything else (the rails, key and
+setup pages, MIDI out, the built-in instrument) is the same as the Windows build.
 
 ## Using it in a DAW
 

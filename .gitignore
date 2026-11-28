@@ -1,4 +1,5 @@
 build/
+build-macos/
 .tools/
 build-logs/
 *.user

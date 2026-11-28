@@ -292,12 +292,16 @@ if (EXISTS "${SL_JUCE_DIR}/CMakeLists.txt")
         JUCE_STRICT_REFCOUNTEDPOINTER=1)
 
     # JUCE's Windows system libraries come from #pragma comment(lib, ...),
-    # which only MSVC understands, so a MinGW build has to name them.
-    set(SL_WIN_LIBS
-        wininet winmm ws2_32 ole32 oleaut32 uuid version shlwapi user32 gdi32
-        shell32 comdlg32 imm32 rstrtmgr dwmapi d2d1 d3d11 dxgi dcomp
-        windowscodecs setupapi crypt32 secur32 winhttp uxtheme oleacc propsys
-        hid shcore dbghelp comctl32 evr mfuuid avrt dsound strmiids quartz ksuser)
+    # which only MSVC understands, so a MinGW build has to name them. JUCE
+    # links the macOS frameworks itself, so the list stays empty there.
+    set(SL_WIN_LIBS)
+    if (WIN32)
+        set(SL_WIN_LIBS
+            wininet winmm ws2_32 ole32 oleaut32 uuid version shlwapi user32 gdi32
+            shell32 comdlg32 imm32 rstrtmgr dwmapi d2d1 d3d11 dxgi dcomp
+            windowscodecs setupapi crypt32 secur32 winhttp uxtheme oleacc propsys
+            hid shcore dbghelp comctl32 evr mfuuid avrt dsound strmiids quartz ksuser)
+    endif()
 
     target_link_libraries(SightLine PRIVATE
         juce::juce_audio_utils
@@ -306,9 +310,10 @@ if (EXISTS "${SL_JUCE_DIR}/CMakeLists.txt")
         juce::juce_recommended_warning_flags
         ${SL_WIN_LIBS})
 
-    if (NOT MSVC)
+    if (MINGW)
         # A plugin gets loaded by a host that knows nothing about our toolchain,
-        # so the runtimes have to be inside the binary.
+        # so the runtimes have to be inside the binary. Apple's linker has no
+        # -static, so this is MinGW-only.
         foreach (slTarget SightLine SightLine_VST3 SightLine_Standalone)
             if (TARGET ${slTarget})
                 target_link_options(${slTarget} PRIVATE -static -static-libgcc -static-libstdc++)
@@ -349,7 +354,7 @@ if (EXISTS "${SL_JUCE_DIR}/CMakeLists.txt")
         juce::juce_video
         juce::juce_recommended_config_flags
         ${SL_WIN_LIBS})
-    if (NOT MSVC)
+    if (MINGW)
         target_link_options(SightLineSmoke PRIVATE -static -static-libgcc -static-libstdc++)
     endif()
     set_target_properties(SightLineSmoke PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")

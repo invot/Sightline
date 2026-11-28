@@ -231,6 +231,10 @@ if (EXISTS "${SL_JUCE_DIR}/CMakeLists.txt")
         PLUGIN_CODE               Sght
         PRODUCT_NAME              "sightline"
         DESCRIPTION               "Play notes and drums by moving your hands in front of a webcam"
+        # macOS terminates an app that opens the camera without a usage string
+        # in its Info.plist; on other platforms these are ignored.
+        CAMERA_PERMISSION_ENABLED TRUE
+        CAMERA_PERMISSION_TEXT    "sightline uses the camera to track your hands."
         IS_SYNTH                  FALSE
         NEEDS_MIDI_INPUT          TRUE
         NEEDS_MIDI_OUTPUT         TRUE

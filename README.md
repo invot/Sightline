@@ -108,9 +108,11 @@ build-macos/SightLine_artefacts/Release/Standalone/sightline.app
 ```
 
 Copy the whole `sightline.vst3` bundle into `~/Library/Audio/Plug-Ins/VST3/`, and
-`sightline.app` into `/Applications` if you want it there. The script makes local builds
-only: it does not sign, notarize or publish them, so another Mac (or a DAW on it) has to
-be told to trust the build, or you have to sign it with your own Developer ID.
+`sightline.app` into `/Applications` if you want it there. macOS asks for camera access
+the first time the app or the plugin opens the picture; the bundle carries the usage
+text for that prompt. The script makes local builds only: it does not sign, notarize or
+publish them, so another Mac (or a DAW on it) has to be told to trust the build, or you
+have to sign it with your own Developer ID.
 
 Set `SL_JUCE_DIR=/path/to/JUCE` to build against another JUCE 8.0.6 checkout, and
 `SL_MACOS_ARCHITECTURES=arm64` (or `x86_64`) for a single-architecture build rather than

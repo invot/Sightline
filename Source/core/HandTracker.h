@@ -13,11 +13,11 @@ namespace sl
 /** Finds the hand on each side of the frame.
 
     With a HandLandmarker attached (the normal case), hands come from the
-    MediaPipe palm detector and landmark model: 21 points per hand, the cursor
+    MediaPipe on Windows or Vision on macOS: 21 points per hand, the cursor
     sits between the thumb and index fingertips, and a pinch is reported. No
     hand in the picture means no hand reported.
 
-    Without one (ONNX Runtime missing), it falls back to the old heuristic:
+    With no landmark backend, it uses the basic tracker:
     skin tone and motion inside the two side regions where the targets live.
     That needs no model but is easily fooled by warm walls and sensor noise. */
 class HandTracker

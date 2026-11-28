@@ -9,6 +9,7 @@
 #include "core/ZoneMap.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
@@ -462,6 +463,34 @@ int main (int, char** argv)
         }
     }
    #endif
+
+    // ---- full-frame landmark backend (Vision) -------------------------------
+    {
+        using Pose = sl::HandPose;
+        std::array<Pose, 2> poses;
+        poses[0].x[Pose::wrist] = 40.0f;
+        poses[0].pinchDistance = 0.025f;
+        poses[1].x[Pose::wrist] = 160.0f;
+        int count = 2;
+        sl::HandLandmarker tracker ([&] (const uint8_t*, int, int, int, std::array<Pose, 2>& output)
+        {
+            output = poses;
+            return count;
+        });
+
+        const std::vector<uint8_t> frame (200 * 100 * 3);
+        check (tracker.process (frame.data(), 200, 100, 600, 0.0) == 2, "full-frame model: finds both hands");
+        const int id = tracker.hands().empty() ? 0 : tracker.hands()[0].id;
+
+        poses[0].pinchDistance = 0.04f;
+        std::swap (poses[0], poses[1]);
+        tracker.process (frame.data(), 200, 100, 600, 33.0);
+        check (! tracker.hands().empty() && tracker.hands()[0].id == id && tracker.hands()[0].pinching,
+               "full-frame model: pinch hysteresis survives detector result reordering");
+
+        count = 0;
+        check (tracker.process (frame.data(), 200, 100, 600, 66.0) == 0, "full-frame model: missing hands clear immediately");
+    }
 
     // ---- the built-in instrument -------------------------------------------
     {

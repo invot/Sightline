@@ -1,8 +1,8 @@
 # sightline
 
-A VST3 plugin and standalone Windows app that turns a webcam into a MIDI controller:
-move a hand onto one of the translucent targets drawn down the sides of the picture and
-the note (or drum) is played by whatever instrument the track is hosting.
+SightLine turns a webcam into a MIDI controller. It runs as VST3 or standalone
+on Windows and macOS, and as Audio Unit on macOS. Move a hand onto one of the
+targets drawn down the sides of the picture to play a note or drum sound.
 
 The plugin never makes sound in a DAW: it sends MIDI out on the host's plugin MIDI port.
 The standalone build adds a small built-in instrument (poly synth + drum kit) so it makes
@@ -10,10 +10,9 @@ noise on its own.
 
 ## Download
 
-Every push to `main` builds the Windows installer and the VST3 and publishes them as the
-[**latest**](https://github.com/invot/sightline/releases/tag/latest) release (see
-`.github/workflows/release.yml`). The installer puts the standalone app in Program Files
-and `sightline.vst3` in the shared VST3 folder; the zip is the VST3 bundle on its own.
+Each successful build on `main` publishes the Windows installer, Windows VST3
+ZIP, and macOS ZIP. The Windows installer puts the standalone app in Program
+Files and `sightline.vst3` in the shared VST3 folder. [Latest release](https://github.com/invot/sightline/releases/tag/latest)
 
 ## Screenshots
 
@@ -85,48 +84,43 @@ builds on macOS.
 
 ### macOS
 
-The macOS script builds universal Apple Silicon + Intel VST3 and standalone bundles for
-macOS 11 or newer with Apple Clang, into a separate `build-macos/` tree. Install the
-developer tools and CMake 3.22+, then get the same JUCE version the Windows build uses:
+Download `sightline-macOS.zip` for macOS 11 or later on Apple Silicon or Intel.
+It contains the VST3, Audio Unit, and standalone app. The bundles are ad-hoc
+signed. [Latest release](https://github.com/invot/sightline/releases/latest)
 
-```bash
-xcode-select --install   # if the developer tools are not installed yet
-brew install cmake
+- For Logic Pro and GarageBand, copy the complete `sightline.component` to
+  `~/Library/Audio/Plug-Ins/Components/`, then reopen the host. To validate the
+  installed Audio Unit in Terminal, run `auval -v aumf Sght Cdbx`.
+- For VST3 hosts, copy `sightline.vst3` to `~/Library/Audio/Plug-Ins/VST3/` and rescan.
+- To run the standalone app, open `sightline.app` or copy it to `/Applications`.
+
+On macOS, SightLine uses Apple Vision for hand landmarks, pinch, and pointing.
+The standalone app requests camera access. When using the plug-in, allow camera
+access for the host in System Settings → Privacy & Security → Camera. MIDI
+output routing depends on the host. The standalone app also offers a MIDI
+output. Configure with `-DSL_HAND_MODEL=OFF` to use the [basic tracker](#the-basic-tracker).
+
+To build locally, install the Xcode Command Line Tools (`xcode-select --install`),
+CMake 3.22 or later, and JUCE 8.0.6. Set `SL_JUCE_DIR` to an existing JUCE
+checkout or use `.tools/JUCE-8.0.6`.
+
+```sh
 git clone --depth 1 --branch 8.0.6 https://github.com/juce-framework/JUCE.git .tools/JUCE-8.0.6
-
-bash ./build-macos.sh          # configure (first run) and build the VST3 and app
-bash ./build-macos.sh clean    # wipe build-macos/ first
-bash ./build-macos.sh tests    # build and run the core tests only
-bash ./build-macos.sh smoke    # render the screenshots (needs a desktop session)
 ```
 
-Outputs:
-
-```text
-build-macos/SightLine_artefacts/Release/VST3/sightline.vst3
-build-macos/SightLine_artefacts/Release/Standalone/sightline.app
+```sh
+bash build-macos.sh build       # build and package all three formats
+bash build-macos.sh tests       # run the headless checks; JUCE is optional
+bash build-macos.sh smoke       # run the editor checks and render screenshots
+bash build-macos.sh clean build # remove the macOS build tree before building
 ```
 
-Copy the whole `sightline.vst3` bundle into `~/Library/Audio/Plug-Ins/VST3/`, and
-`sightline.app` into `/Applications` if you want it there. macOS asks for camera access
-the first time the app or the plugin opens the picture; the bundle carries the usage
-text for that prompt. The script makes local builds only: it does not sign, notarize or
-publish them, so another Mac (or a DAW on it) has to be told to trust the build, or you
-have to sign it with your own Developer ID.
-
-Set `SL_JUCE_DIR=/path/to/JUCE` to build against another JUCE 8.0.6 checkout, and
-`SL_MACOS_ARCHITECTURES=arm64` (or `x86_64`) for a single-architecture build rather than
-the universal default. `MACOSX_DEPLOYMENT_TARGET` changes the minimum macOS version
-(default 11.0) and `JOBS=4` limits build parallelism:
-
-```bash
-SL_JUCE_DIR="$HOME/JUCE" SL_MACOS_ARCHITECTURES=arm64 bash ./build-macos.sh
-```
-
-Hand tracking on macOS uses the [basic tracker](#the-basic-tracker): the MediaPipe
-landmark model runs on ONNX Runtime, and only the Windows runtime is wired into CMake, so
-a macOS build configures with the hand model off. Everything else (the rails, key and
-setup pages, MIDI out, the built-in instrument) is the same as the Windows build.
+The bundles are under `build-macos/SightLine_artefacts/Release/` in `VST3/`, `AU/`,
+and `Standalone/`. The script copies the Audio Unit to `dist/sightline.component`
+and writes `dist/sightline-macOS.zip`. Set `SL_MACOS_ARCHITECTURES=arm64` or
+`x86_64` for a single-architecture build. Set `JOBS` or pass a job count as the
+second argument to control build parallelism. `MACOSX_DEPLOYMENT_TARGET` defaults
+to `11.0`.
 
 ## Using it in a DAW
 

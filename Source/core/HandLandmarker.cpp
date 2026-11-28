@@ -175,6 +175,10 @@ HandLandmarker::HandLandmarker (std::unique_ptr<InferenceModel> palmModel,
     }
 }
 
+HandLandmarker::HandLandmarker (PoseDetector detector) : detectPoses (std::move (detector))
+{
+}
+
 void HandLandmarker::reset()
 {
     for (auto& s : slots)
@@ -450,6 +454,67 @@ void HandLandmarker::updateCursor (Slot& slot, int width, int height, double now
     slot.lastMs = nowMs;
 }
 
+void HandLandmarker::trackDetectedPoses (const uint8_t* rgb, int width, int height, int stride, double nowMs)
+{
+    std::array<HandPose, 2> poses;
+    const int count = std::clamp (detectPoses (rgb, width, height, stride, poses), 0, 2);
+    std::array<bool, 2> used {};
+
+    for (auto& slot : slots)
+    {
+        if (! slot.active)
+            continue;
+
+        int match = -1;
+        float nearest = (float) std::min (width, height) * 0.2f;
+        for (int i = 0; i < count; ++i)
+        {
+            if (used[(size_t) i])
+                continue;
+
+            const auto& pose = poses[(size_t) i];
+            const auto distance = std::hypot (pose.x[HandPose::wrist] - slot.pose.x[HandPose::wrist],
+                                              pose.y[HandPose::wrist] - slot.pose.y[HandPose::wrist]);
+            if (distance < nearest)
+            {
+                nearest = distance;
+                match = i;
+            }
+        }
+
+        if (match < 0)
+        {
+            slot.active = false;
+            continue;
+        }
+
+        auto& pose = poses[(size_t) match];
+        pose.id = slot.pose.id;
+        pose.pinching = slot.pose.pinching;
+        pose.pointing = slot.pose.pointing;
+        pose.clicking = slot.pose.clicking;
+        slot.pose = pose;
+        used[(size_t) match] = true;
+        updateCursor (slot, width, height, nowMs, false);
+    }
+
+    for (int i = 0; i < count; ++i)
+    {
+        if (used[(size_t) i])
+            continue;
+
+        auto& slot = slots[0].active ? slots[1] : slots[0];
+        slot.active = true;
+        slot.pose = poses[(size_t) i];
+        slot.pose.id = nextId++;
+        updateCursor (slot, width, height, nowMs, true);
+    }
+
+    for (const auto& slot : slots)
+        if (slot.active)
+            found.push_back (slot.pose);
+}
+
 int HandLandmarker::process (const uint8_t* rgb, int width, int height, int stride, double nowMs)
 {
     found.clear();
@@ -458,6 +523,12 @@ int HandLandmarker::process (const uint8_t* rgb, int width, int height, int stri
     {
         reset();
         return 0;
+    }
+
+    if (detectPoses)
+    {
+        trackDetectedPoses (rgb, width, height, stride, nowMs);
+        return (int) found.size();
     }
 
     // ---- follow the hands we already have ---------------------------------

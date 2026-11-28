@@ -1,7 +1,9 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -63,8 +65,11 @@ struct HandPose
 class HandLandmarker
 {
 public:
+    using PoseDetector = std::function<int (const uint8_t*, int, int, int, std::array<HandPose, 2>&)>;
+
     HandLandmarker (std::unique_ptr<InferenceModel> palmModel,
                     std::unique_ptr<InferenceModel> landmarkModel);
+    explicit HandLandmarker (PoseDetector);
 
     void reset();
 
@@ -123,7 +128,9 @@ private:
     static Roi roiFromPalm (const Palm&);
     static Roi roiFromPose (const HandPose&);
     void updateCursor (Slot&, int width, int height, double nowMs, bool fresh);
+    void trackDetectedPoses (const uint8_t* rgb, int width, int height, int stride, double nowMs);
 
+    PoseDetector detectPoses;
     std::unique_ptr<InferenceModel> palm, landmark;
     std::vector<float> palmInput, handInput;
     std::vector<std::vector<float>> outputs;

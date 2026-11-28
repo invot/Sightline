@@ -5,6 +5,8 @@
 
 #if SL_HAVE_ORT
  #include "SightLineModels.h"
+#elif SL_HAVE_VISION
+ #include "platform/VisionHandPose.h"
 #endif
 
 namespace sl
@@ -152,8 +154,16 @@ void SightLineEditor::loadHandModel()
             return;
         }
     }
-   #else
-    error = "built without ONNX Runtime";
+#elif SL_HAVE_VISION
+    if (auto landmarker = makeVisionHandLandmarker())
+    {
+        tracker.setLandmarker (std::move (landmarker));
+        stage.setTrackerInfo ("Hand model: pinch to play", true);
+        return;
+    }
+    error = "Apple Vision hand tracking unavailable";
+#else
+    error = "built without a hand landmark model";
    #endif
 
     DBG ("sightline: hand model unavailable: " << error);

@@ -34,7 +34,7 @@ set(SL_CORE_SOURCES
 # build still works and the app uses the basic skin/motion tracker.
 # ---------------------------------------------------------------------------
 set(SL_DEPS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/.tools" CACHE PATH "Where downloaded dependencies are kept")
-option(SL_HAND_MODEL "Track hands with the MediaPipe landmark model (ONNX Runtime)" ON)
+option(SL_HAND_MODEL "Track hands with MediaPipe on Windows or Vision on macOS" ON)
 option(SL_REQUIRE_HAND_MODEL "Fail configure when the hand landmark model cannot be prepared (release builds)" OFF)
 
 set(SL_ORT_VERSION 1.31.1)
@@ -168,7 +168,9 @@ if (SL_HAND_MODEL AND WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8)
     endif()
 endif()
 
-if (SL_HAVE_ORT)
+if (APPLE AND SL_HAND_MODEL)
+    message(STATUS "Hand landmark model: on (Apple Vision)")
+elseif (SL_HAVE_ORT)
     message(STATUS "Hand landmark model: on (ONNX Runtime ${SL_ORT_VERSION})")
 elseif (SL_REQUIRE_HAND_MODEL)
     message(FATAL_ERROR "Hand landmark model: off, but SL_REQUIRE_HAND_MODEL is set. "
@@ -223,6 +225,12 @@ if (EXISTS "${SL_JUCE_DIR}/CMakeLists.txt")
             ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/Assets/icon-1024.png"
             ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/Assets/icon-256.png")
     endif()
+    if(APPLE AND SL_HAND_MODEL)
+        enable_language(OBJCXX)
+        find_library(SL_VISION_FRAMEWORK Vision REQUIRED)
+        find_library(SL_COREGRAPHICS_FRAMEWORK CoreGraphics REQUIRED)
+        set_source_files_properties(Source/platform/VisionHandPose.mm PROPERTIES COMPILE_OPTIONS -fobjc-arc)
+    endif()
     juce_add_plugin(SightLine
         ${IOLINE_ICON_ARGS}
         COMPANY_NAME              "Codebuff"
@@ -241,7 +249,7 @@ if (EXISTS "${SL_JUCE_DIR}/CMakeLists.txt")
         IS_MIDI_EFFECT            FALSE
         EDITOR_WANTS_KEYBOARD_FOCUS FALSE
         COPY_PLUGIN_AFTER_BUILD   FALSE
-        FORMATS                   VST3 Standalone
+        FORMATS                   VST3 AU Standalone
         VST3_CATEGORIES           "Fx"
         AAX_CATEGORY              AAX_ePlugInCategory_None)
 
@@ -362,6 +370,15 @@ if (EXISTS "${SL_JUCE_DIR}/CMakeLists.txt")
         target_link_options(SightLineSmoke PRIVATE -static -static-libgcc -static-libstdc++)
     endif()
     set_target_properties(SightLineSmoke PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
+    if(APPLE AND SL_HAND_MODEL)
+        foreach(target SightLine SightLineSmoke)
+            target_sources(${target} PRIVATE Source/platform/VisionHandPose.mm)
+            target_compile_definitions(${target} PRIVATE SL_HAVE_VISION=1)
+            target_link_libraries(${target} PRIVATE "${SL_VISION_FRAMEWORK}" "${SL_COREGRAPHICS_FRAMEWORK}")
+            set_target_properties(${target} PROPERTIES OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED ON)
+        endforeach()
+    endif()
 else()
     message(WARNING "JUCE not found at ${SL_JUCE_DIR}; only the test target will be built.")
 endif()

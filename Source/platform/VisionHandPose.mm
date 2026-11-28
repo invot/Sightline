@@ -81,8 +81,9 @@ int detectHands (VNDetectHumanHandPoseRequest* request, const uint8_t* rgb,
             return 0;
 
         auto* handler = [[VNImageRequestHandler alloc] initWithCGImage:image options:@{}];
+        const bool detected = [handler performRequests:@[request] error:nullptr];
         CGImageRelease (image);
-        if (! [handler performRequests:@[request] error:nullptr])
+        if (! detected)
             return 0;
 
         int count = 0;

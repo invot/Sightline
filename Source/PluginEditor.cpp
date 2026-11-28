@@ -1,4 +1,5 @@
 #include "PluginEditor.h"
+#include "ui/Logo.h"
 #include "StandaloneBridge.h"
 #include "core/OrtModel.h"
 
@@ -460,33 +461,7 @@ void SightLineEditor::triggerTestNote()
 //==============================================================================
 void SightLineEditor::paintLogo (juce::Graphics& g, juce::Rectangle<float> logo)
 {
-    // A viewfinder with a note line running through it.
-    const float inset = 3.0f;
-    const float arm = logo.getWidth() * 0.34f;
-
-    juce::Path brackets;
-    brackets.startNewSubPath (logo.getX(), logo.getY() + arm);
-    brackets.lineTo (logo.getX(), logo.getY());
-    brackets.lineTo (logo.getX() + arm, logo.getY());
-    brackets.startNewSubPath (logo.getRight() - arm, logo.getY());
-    brackets.lineTo (logo.getRight(), logo.getY());
-    brackets.lineTo (logo.getRight(), logo.getY() + arm);
-    brackets.startNewSubPath (logo.getRight(), logo.getBottom() - arm);
-    brackets.lineTo (logo.getRight(), logo.getBottom());
-    brackets.lineTo (logo.getRight() - arm, logo.getBottom());
-    brackets.startNewSubPath (logo.getX() + arm, logo.getBottom());
-    brackets.lineTo (logo.getX(), logo.getBottom());
-    brackets.lineTo (logo.getX(), logo.getBottom() - arm);
-
-    g.setColour (ui::pal::text);
-    g.strokePath (brackets, juce::PathStrokeType (1.6f, juce::PathStrokeType::curved,
-                                                  juce::PathStrokeType::rounded));
-
-    g.setColour (ui::pal::teal);
-    g.drawLine (logo.getX() + inset, logo.getCentreY(), logo.getRight() - inset,
-                logo.getCentreY(), 2.0f);
-    g.fillEllipse (juce::Rectangle<float> (6.0f, 6.0f).withCentre ({ logo.getCentreX(),
-                                                                    logo.getCentreY() }));
+    ioline::branding::drawLogoMark (g, logo);
 }
 
 void SightLineEditor::paint (juce::Graphics& g)
@@ -499,7 +474,7 @@ void SightLineEditor::paint (juce::Graphics& g)
     g.setColour (pal::header);
     g.fillRoundedRectangle (h, 14.0f);
 
-    paintLogo (g, { h.getX() + 16.0f, h.getCentreY() - 12.0f, 24.0f, 24.0f });
+    paintLogo (g, { h.getX() + 13.0f, h.getCentreY() - 15.0f, 30.0f, 30.0f });
 
     g.setColour (pal::text);
     g.setFont (uiFont (18.0f, true));

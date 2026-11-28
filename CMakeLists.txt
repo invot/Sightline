@@ -218,7 +218,13 @@ endif()
 if (EXISTS "${SL_JUCE_DIR}/CMakeLists.txt")
     add_subdirectory("${SL_JUCE_DIR}" "${CMAKE_BINARY_DIR}/juce" EXCLUDE_FROM_ALL)
 
+    if(APPLE)
+        set(IOLINE_ICON_ARGS
+            ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/Assets/icon-1024.png"
+            ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/Assets/icon-256.png")
+    endif()
     juce_add_plugin(SightLine
+        ${IOLINE_ICON_ARGS}
         COMPANY_NAME              "Codebuff"
         BUNDLE_ID                 "com.codebuff.sightline"
         PLUGIN_MANUFACTURER_CODE  Cdbx

@@ -4,7 +4,7 @@ namespace sl::ui
 {
 
 StagePanel::StagePanel (SightLineProcessor& p)
-    : overlaySwitch ({ "Keys", "Scale", "Drums" }, pal::teal),
+    : overlaySwitch ({ "Keys", "Scale", "Drums" }, pal::brand),
       proc (p)
 {
     addAndMakeVisible (overlaySwitch);

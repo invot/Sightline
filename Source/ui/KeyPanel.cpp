@@ -50,8 +50,8 @@ void KeyPanel::paint (juce::Graphics& g)
 
     auto keyHeader = keyCard;
     auto railHeader = railCard;
-    drawSectionHeader (g, keyHeader.removeFromTop (46).withTrimmedLeft (16), "Key & Scale", pal::purple);
-    drawSectionHeader (g, railHeader.removeFromTop (46).withTrimmedLeft (16), "The rails", pal::teal);
+    drawSectionHeader (g, keyHeader.removeFromTop (46).withTrimmedLeft (16), "Key & Scale", pal::brand);
+    drawSectionHeader (g, railHeader.removeFromTop (46).withTrimmedLeft (16), "The rails", pal::brand);
 
     drawCaption (g, octaveCaption, "Octave");
 
@@ -196,7 +196,7 @@ void KeyPanel::drawPitchClassMap (juce::Graphics& g, juce::Rectangle<int> area)
         const bool member = (mask & (1u << pc)) != 0;
         const bool isRoot = pc == root;
 
-        g.setColour (member ? pal::purple.withAlpha (isRoot ? 0.95f : 0.55f) : pal::panelSoft);
+        g.setColour (member ? pal::brand.withAlpha (isRoot ? 0.95f : 0.55f) : pal::panelSoft);
         g.fillRoundedRectangle (cell.toFloat(), 7.0f);
 
         g.setColour (member ? juce::Colours::black.withAlpha (0.85f) : pal::dim.withAlpha (0.7f));

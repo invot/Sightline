@@ -29,15 +29,15 @@ private:
     std::function<void()> cameraChanged, testNote;
 
     juce::ComboBox cameraCombo;
-    TogglePill mirrorPill { "Mirror", pal::teal };
+    TogglePill mirrorPill { "Mirror", pal::brand };
     TogglePill builtInPill { "Built-in sound", pal::pink };
     TogglePill pinchPill { "Pinch to play", pal::amber };
 
-    SliderRow sensitivity { "Sensitivity", pal::teal, " %" };
+    SliderRow sensitivity { "Sensitivity", pal::brand, " %" };
     SliderRow dwell       { "Dwell", pal::amber, " ms" };
     SliderRow release     { "Release", pal::amber, " ms" };
-    SliderRow velocity    { "Velocity", pal::purple, "" };
-    SliderRow opacity     { "Opacity", pal::teal, " %" };
+    SliderRow velocity    { "Velocity", pal::brand, "" };
+    SliderRow opacity     { "Opacity", pal::brand, " %" };
     SliderRow volume      { "Volume", pal::pink, " %" };
 
     LabelledCombo melodyChan { "Melody channel" };

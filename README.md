@@ -27,6 +27,16 @@ MIDI note number in its corner.
 
 ![Play page, Drums overlay](docs/screenshots/play-drums.png)
 
+**Play, tracking test**: each hand's skeleton over the picture, teal on the left rail and
+pink on the right, with the tracker's readings in the card.
+
+![Play page, tracking test](docs/screenshots/play-tracking.png)
+
+**Play, MIDI learn**: a drum pad listening for the next note, so a kit that does not use
+General MIDI can be mapped.
+
+![Play page, MIDI learn](docs/screenshots/play-learn.png)
+
 **Key**: key, scale and octave, and what each rail will play.
 
 ![Key page](docs/screenshots/key.png)

@@ -118,11 +118,11 @@ void SetupPanel::paint (juce::Graphics& g)
 
     auto c1 = cameraCard, c2 = playCard, c3 = midiCard;
 
-    drawSectionHeader (g, c1.removeFromTop (46).withTrimmedLeft (16), "Camera", pal::teal);
+    drawSectionHeader (g, c1.removeFromTop (46).withTrimmedLeft (16), "Camera", pal::brand);
     drawSectionHeader (g, c2.removeFromTop (46).withTrimmedLeft (16), "Playing", pal::amber);
-    drawSectionHeader (g, c3.removeFromTop (46).withTrimmedLeft (16), "MIDI out", pal::purple);
+    drawSectionHeader (g, c3.removeFromTop (46).withTrimmedLeft (16), "MIDI out", pal::brand);
 
-    g.setColour (cameraLive ? pal::teal : pal::pink);
+    g.setColour (cameraLive ? pal::brand : pal::pink);
     g.setFont (uiFont (10.5f, true));
     g.drawFittedText (cameraStatus.toUpperCase(), cameraStatusArea, juce::Justification::centredLeft, 1);
 

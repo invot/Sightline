@@ -19,7 +19,9 @@ namespace pal
     inline const juce::Colour dim       { 0xff8c8c94 };
     inline const juce::Colour teal      { 0xff4fd8c8 };
     inline const juce::Colour pink      { 0xffff8a9b };
-    inline const juce::Colour purple    { 0xffa99bff };
+    // The ioline mark's colour (Assets/icon.svg): the app's primary accent.
+    inline const juce::Colour brand     { 0xffa99bff };
+    inline const juce::Colour purple    { brand };
     inline const juce::Colour yellow    { 0xfff3e3a6 };
     inline const juce::Colour amber     { 0xffe9b06a };
 }
@@ -29,12 +31,12 @@ inline juce::Colour accentFor (Overlay o)
 {
     switch (o)
     {
-        case Overlay::Keys:  return pal::teal;
-        case Overlay::Scale: return pal::purple;
+        case Overlay::Keys:  return pal::brand;
+        case Overlay::Scale: return pal::teal;
         case Overlay::Drums: return pal::pink;
     }
 
-    return pal::teal;
+    return pal::brand;
 }
 
 inline juce::Font uiFont (float height, bool bold = false)
@@ -104,8 +106,8 @@ public:
         setColour (juce::TextEditor::focusedOutlineColourId, pal::purple);
 
         setColour (juce::Slider::backgroundColourId, pal::stroke);
-        setColour (juce::Slider::trackColourId, pal::teal.withAlpha (0.6f));
-        setColour (juce::Slider::thumbColourId, pal::teal);
+        setColour (juce::Slider::trackColourId, pal::brand.withAlpha (0.6f));
+        setColour (juce::Slider::thumbColourId, pal::brand);
 
         setColour (juce::TextButton::buttonColourId, pal::panelSoft);
         setColour (juce::TextButton::buttonOnColourId, pal::purple);
